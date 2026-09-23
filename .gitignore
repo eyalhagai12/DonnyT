@@ -1,0 +1,30 @@
+# --- secrets and machine-local config (never commit) ---
+.env
+.env.local
+config.toml
+.mcp.json
+
+# --- python ---
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+
+# --- offline install bundle (built, not committed; see scripts/) ---
+vendor/wheels/*
+!vendor/wheels/.gitkeep
+
+# --- obsidian per-machine state (graph/app config IS tracked) ---
+vault/.obsidian/workspace.json
+vault/.obsidian/workspace-mobile.json
+vault/.obsidian/cache/
+vault/.trash/
+
+# --- scratch ---
+.scratch/
+*.log

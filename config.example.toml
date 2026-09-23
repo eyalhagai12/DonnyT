@@ -1,0 +1,90 @@
+# ===========================================================================
+# DonnyT configuration.  Copy to config.toml and fill in.
+#
+#   cp config.example.toml config.toml      (macOS/Linux)
+#   Copy-Item config.example.toml config.toml   (Windows PowerShell)
+#
+# Non-secret settings only. API tokens live in .env.
+# Every value below is explained in INSTALL.md step 5, including where to
+# find the ids. Run `donnyt doctor` after editing to verify.
+# ===========================================================================
+
+[atlassian]
+# Your Atlassian Cloud site, no trailing slash.
+# Find it in the browser address bar when you open Jira or Confluence.
+site = "https://your-team.atlassian.net"
+
+
+[confluence]
+# The space key holding your team docs. It is the short code in a page URL:
+#   .../wiki/spaces/ENG/pages/12345/Title   ->   "ENG"
+space = "ENG"
+
+# The page holding your merge-request description template.
+# PREFER the numeric id: it survives the page being renamed.
+# Find it in the page URL: .../wiki/spaces/ENG/pages/123456789/MR+Template
+mr_template_page_id = ""
+
+# Fallback used only when mr_template_page_id is empty. Must match exactly.
+mr_template_title = "Merge Request Template"
+
+# Optional. Page to file published sprint plans under. Empty = space root.
+sprint_plan_parent_page_id = ""
+
+
+[jira]
+# Project key: the prefix on every issue, e.g. "TEAM" in TEAM-1234.
+project_key = "TEAM"
+
+# Scrum board id, from the board URL:
+#   .../jira/software/projects/TEAM/boards/42   ->   42
+# `donnyt doctor` lists the available board ids if you get this wrong.
+board_id = 0
+
+# Story points field id. customfield_10016 is the Jira Cloud default.
+# To confirm: open any estimated issue and check
+#   <site>/rest/api/3/issue/TEAM-1234?fields=*all
+# for the custom field holding the point value.
+story_points_field = "customfield_10016"
+
+# Statuses that count as finished when measuring velocity. Match your
+# workflow's exact status names, including capitalisation.
+done_statuses = ["Done", "Closed", "Resolved"]
+
+
+[gitlab]
+# Your GitLab instance. Self-hosted example: "https://gitlab.internal.corp"
+url = "https://gitlab.com"
+
+# Default project as "group/subgroup/repo", or its numeric id.
+# Leave empty to pass the project explicitly on every call.
+default_project = ""
+
+# Branch merge requests target by default.
+default_target_branch = "main"
+
+
+[vault]
+# Obsidian vault location, relative to the repo root or an absolute path.
+path = "vault"
+
+
+# ---------------------------------------------------------------------------
+# Team roster. Drives capacity planning and links Jira/GitLab identities to
+# the person notes in the vault.
+#
+#   name     - display name. MUST match the Jira display name exactly, so
+#              assignees resolve. This is also the vault note title.
+#   jira     - Jira accountId. Find it at:
+#              <site>/rest/api/3/user/search?query=<their-email>
+#   gitlab   - GitLab username, without the @.
+#   capacity - story points this person can take in a full sprint.
+#
+# Copy the block per person. Delete the example.
+# ---------------------------------------------------------------------------
+
+[[team.members]]
+name = "Example Person"
+jira = ""
+gitlab = ""
+capacity = 8

@@ -1,0 +1,12 @@
+{
+  "_comment": "Reference only. install.ps1 / install.sh generate the real .mcp.json with this machine's interpreter path and repo location. Regenerate it rather than editing by hand.",
+  "mcpServers": {
+    "donnyt": {
+      "command": "C:\path\to\DonnyT\.venv\Scripts\python.exe",
+      "args": ["-m", "donnyt.mcp_server"],
+      "env": {
+        "DONNYT_HOME": "C:\path\to\DonnyT"
+      }
+    }
+  }
+}

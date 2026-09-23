@@ -1,0 +1,28 @@
+[project]
+name = "donnyt"
+version = "0.1.0"
+description = "Team-lead toolkit: Confluence-templated GitLab MRs, Jira sprint planning, and an Obsidian knowledge graph."
+requires-python = ">=3.11"
+
+# The core is deliberately dependency-free -- stdlib urllib, tomllib and
+# html.parser -- so it installs and runs on an isolated network with no package
+# index. Only the MCP server needs a third-party package.
+dependencies = []
+
+[project.optional-dependencies]
+# Required only to expose the toolkit to Claude Code as an MCP server.
+# The installer handles this; see INSTALL.md.
+mcp = ["mcp>=1.2"]
+
+# NOTE: donnyt is not pip-installed by install.ps1 / install.sh. They add src/
+# to the virtual environment with a .pth file so your edits take effect without
+# a reinstall, and so the offline install needs no build backend. This file is
+# kept so the project is still a valid, installable package if you ever want
+# `pip install -e .`.
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/donnyt"]

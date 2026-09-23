@@ -1,0 +1,72 @@
+{
+  "collapse-filter": false,
+  "search": "",
+  "showTags": true,
+  "showAttachments": false,
+  "hideUnresolved": true,
+  "showOrphans": true,
+  "collapse-color-groups": false,
+  "colorGroups": [
+    {
+      "query": "path:People",
+      "color": {
+        "a": 1,
+        "rgb": 5151733
+      }
+    },
+    {
+      "query": "path:Sprints",
+      "color": {
+        "a": 1,
+        "rgb": 6279272
+      }
+    },
+    {
+      "query": "path:MRs",
+      "color": {
+        "a": 1,
+        "rgb": 16098851
+      }
+    },
+    {
+      "query": "path:Decisions",
+      "color": {
+        "a": 1,
+        "rgb": 12938480
+      }
+    },
+    {
+      "query": "path:Projects",
+      "color": {
+        "a": 1,
+        "rgb": 15914308
+      }
+    },
+    {
+      "query": "path:Meetings",
+      "color": {
+        "a": 1,
+        "rgb": 9343382
+      }
+    },
+    {
+      "query": "path:Topics",
+      "color": {
+        "a": 1,
+        "rgb": 4178377
+      }
+    }
+  ],
+  "collapse-display": false,
+  "showArrow": true,
+  "textFadeMultiplier": -0.3,
+  "nodeSizeMultiplier": 1.4,
+  "lineSizeMultiplier": 1.2,
+  "collapse-forces": false,
+  "centerStrength": 0.42,
+  "repelStrength": 12,
+  "linkStrength": 0.65,
+  "linkDistance": 180,
+  "scale": 1,
+  "close": false
+}
