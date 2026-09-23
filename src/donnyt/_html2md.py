@@ -23,14 +23,36 @@ def _preprocess_confluence(markup: str) -> str:
     """Translate ``ac:``/``ri:`` elements into plain HTML we can then convert."""
 
     # Structured macros -> a visible label plus whatever rich text they wrap.
+    #
+    # Some macros (status, expand's title, many custom ones) carry their whole
+    # meaning in <ac:parameter> attributes and have no rich-text body at all.
+    # A converter that discards parameters unconditionally silently deletes
+    # that content. Since we cannot know every macro a given Confluence
+    # instance uses, the safe default is to keep parameter values visible
+    # whenever there is no body to fall back on, rather than drop them.
     def macro(match: re.Match[str]) -> str:
         name = match.group("name")
-        body = match.group("body") or ""
-        body = re.sub(r"<ac:parameter\b[^>]*>.*?</ac:parameter>", "", body, flags=re.S)
+        raw_body = match.group("body") or ""
+
+        params = re.findall(
+            r'<ac:parameter\b[^>]*ac:name="([^"]*)"[^>]*>(.*?)</ac:parameter>',
+            raw_body,
+            flags=re.S,
+        )
+        body = re.sub(r"<ac:parameter\b[^>]*>.*?</ac:parameter>", "", raw_body, flags=re.S)
         body = re.sub(r"</?ac:rich-text-body\s*>", "", body)
         body = re.sub(r"</?ac:plain-text-body\s*>", "", body)
+
         label = name.replace("-", " ").title()
-        return f"<p>[{label}]</p>{body}"
+        # "colour"/"color" params are presentation, not content -- e.g. the
+        # status macro's colour swatch. Everything else (title, id, ...) is
+        # kept: it is cheap to show one extra word and expensive to lose one.
+        param_text = "; ".join(
+            v.strip() for k, v in params if v.strip() and k.lower() not in {"colour", "color"}
+        )
+
+        tag = f"[{label}: {param_text}]" if param_text else f"[{label}]"
+        return f"<p>{tag}</p>{body}" if body.strip() else f"<p>{tag}</p>"
 
     markup = re.sub(
         r'<ac:structured-macro\b[^>]*ac:name="(?P<name>[^"]+)"[^>]*>'

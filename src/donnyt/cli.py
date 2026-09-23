@@ -34,10 +34,21 @@ def build_parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
 
     sub.add_parser("doctor", help="Check configuration and connectivity.")
-    sub.add_parser("template", help="Print the Confluence MR template as Markdown.")
+    template = sub.add_parser("template", help="Print the Confluence MR template as Markdown.")
+    template.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print the raw Confluence storage-format XHTML instead of the converted Markdown. "
+        "Use this to diagnose a section that converted wrong or went missing.",
+    )
 
     page = sub.add_parser("page", help="Print a Confluence page as Markdown.")
     page.add_argument("page_id")
+    page.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print the raw Confluence storage-format XHTML instead of the converted Markdown.",
+    )
 
     search = sub.add_parser("search", help="Search Confluence with CQL.")
     search.add_argument("cql")
@@ -115,17 +126,18 @@ def _dispatch(args: argparse.Namespace) -> int:
         return 0
 
     if command == "template":
-        from .graph import fetch_mr_template
+        from .confluence import ConfluenceClient
 
-        result = fetch_mr_template()
-        print(f"# Source: {result['page']['title']}  ({result['page']['url']})\n")
-        print(result["markdown"])
+        page = ConfluenceClient().get_template()
+        print(f"<!-- Source: {page.title}  ({page.url}) -->\n")
+        print(page.storage if args.raw else page.markdown)
         return 0
 
     if command == "page":
         from .confluence import ConfluenceClient
 
-        print(ConfluenceClient().get_page(args.page_id).markdown)
+        page = ConfluenceClient().get_page(args.page_id)
+        print(page.storage if args.raw else page.markdown)
         return 0
 
     if command == "search":

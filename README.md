@@ -31,6 +31,10 @@ python -m donnyt.cli doctor
 
 Full walkthrough, credentials and troubleshooting: **[INSTALL.md](INSTALL.md)**.
 
+Setting this up *on* the isolated network, with a weaker model doing the work
+and your Confluence template never leaving that network:
+**[INTERNAL_SETUP.md](INTERNAL_SETUP.md)**.
+
 ---
 
 ## Using it

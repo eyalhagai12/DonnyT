@@ -51,23 +51,39 @@ def _guard(fn, *args: Any, **kwargs: Any) -> Any:
 
 
 @mcp.tool()
-def confluence_get_mr_template() -> dict[str, Any]:
+def confluence_get_mr_template(raw: bool = False) -> dict[str, Any]:
     """Fetch the team's merge-request template from Confluence as Markdown.
 
     Returns the template body plus its section headings. Use this before
     writing any MR description so the description matches the team's agreed
     structure rather than an invented one.
+
+    Set `raw=True` to get the untouched Confluence storage-format XHTML
+    instead of Markdown. Use this only to diagnose a template that converted
+    wrong: compare the raw XHTML against the Markdown to see which element
+    (a macro, a layout, a table) did not carry over, then either work around
+    it in the Markdown you write, or fix `src/donnyt/_html2md.py` to handle it
+    -- see INTERNAL_SETUP.md.
     """
-    return _guard(fetch_mr_template)
+    def run_raw() -> dict[str, Any]:
+        page = ConfluenceClient().get_template()
+        return {**page.summary(), "storage": page.storage}
+
+    return _guard(run_raw) if raw else _guard(fetch_mr_template)
 
 
 @mcp.tool()
-def confluence_get_page(page_id: str) -> dict[str, Any]:
-    """Read a Confluence page by id and return its content as Markdown."""
+def confluence_get_page(page_id: str, raw: bool = False) -> dict[str, Any]:
+    """Read a Confluence page by id and return its content as Markdown.
+
+    Set `raw=True` to get the untouched storage-format XHTML instead, for
+    diagnosing a conversion problem.
+    """
 
     def run() -> dict[str, Any]:
         page = ConfluenceClient().get_page(page_id)
-        return {**page.summary(), "markdown": page.markdown}
+        content = page.storage if raw else page.markdown
+        return {**page.summary(), ("storage" if raw else "markdown"): content}
 
     return _guard(run)
 
