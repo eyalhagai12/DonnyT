@@ -1,0 +1,92 @@
+# Local Jira + Confluence Data Center and GitLab CE, for testing DonnyT
+# against real self-hosted APIs before it goes onto the internal network.
+#
+#   docker compose up -d          start (first boot: 5-10 minutes)
+#   docker compose ps             health of each service
+#   docker compose down           stop, keep data
+#   docker compose down -v        stop and wipe everything
+#
+# Versions come from .env (copy .env.example). Match them to the internal
+# instances: Data Center APIs differ between major versions.
+#
+# Jira and Confluence need a free 30-day trial licence each on first visit;
+# see README.md. GitLab CE needs none.
+
+name: donnyt-devstack
+
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_PASSWORD: devstack
+    volumes:
+      - db:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      retries: 20
+
+  jira:
+    image: atlassian/jira-software:${JIRA_VERSION:-10.3}
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      JVM_MINIMUM_MEMORY: 1024m
+      JVM_MAXIMUM_MEMORY: 2048m
+      # Pre-wires the database so the setup wizard skips that step.
+      ATL_JDBC_URL: jdbc:postgresql://db:5432/jira
+      ATL_JDBC_USER: jira
+      ATL_JDBC_PASSWORD: jira
+      ATL_DB_DRIVER: org.postgresql.Driver
+      ATL_DB_TYPE: postgres72
+    volumes:
+      - jira:/var/atlassian/application-data/jira
+    depends_on:
+      db:
+        condition: service_healthy
+
+  confluence:
+    image: atlassian/confluence:${CONFLUENCE_VERSION:-9.2}
+    ports:
+      - "127.0.0.1:8090:8090"
+    environment:
+      JVM_MINIMUM_MEMORY: 1024m
+      JVM_MAXIMUM_MEMORY: 2048m
+      ATL_JDBC_URL: jdbc:postgresql://db:5432/confluence
+      ATL_JDBC_USER: confluence
+      ATL_JDBC_PASSWORD: confluence
+      ATL_DB_TYPE: postgresql
+    volumes:
+      - confluence:/var/atlassian/application-data/confluence
+    depends_on:
+      db:
+        condition: service_healthy
+
+  gitlab:
+    image: gitlab/gitlab-ce:${GITLAB_VERSION:-latest}
+    ports:
+      - "127.0.0.1:8929:8929"
+    shm_size: 256m
+    environment:
+      GITLAB_ROOT_PASSWORD: ${GITLAB_ROOT_PASSWORD:-DonnyT-devstack-2026}
+      # Listen on 8929 inside too, so clone URLs and web links are right.
+      # The rest trims GitLab's footprint to what a test box needs.
+      GITLAB_OMNIBUS_CONFIG: |
+        external_url 'http://localhost:8929'
+        puma['worker_processes'] = 0
+        sidekiq['concurrency'] = 5
+        prometheus_monitoring['enable'] = false
+        gitlab_rails['usage_ping_enabled'] = false
+    volumes:
+      - gitlab-config:/etc/gitlab
+      - gitlab-logs:/var/log/gitlab
+      - gitlab-data:/var/opt/gitlab
+
+volumes:
+  db:
+  jira:
+  confluence:
+  gitlab-config:
+  gitlab-logs:
+  gitlab-data:

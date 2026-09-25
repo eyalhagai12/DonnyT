@@ -18,10 +18,23 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
+
+from ._http import JSONClient
 
 
 class ConfigError(RuntimeError):
     """Configuration or credentials are missing, empty, or malformed."""
+
+
+def _env(name: str) -> str:
+    return os.environ.get(name, "").strip()
+
+
+def _require_url(setting: str, value: str) -> str:
+    if not value.startswith(("http://", "https://")):
+        raise ConfigError(f"{setting} must be a full URL including https://, got {value!r}")
+    return value
 
 
 # The repo always has this file; an installed copy in site-packages never does.
@@ -98,22 +111,104 @@ class Config:
     # -- atlassian ---------------------------------------------------------
     @property
     def atlassian_site(self) -> str:
-        site = str(self._get("atlassian.site", required=True)).rstrip("/")
-        if not site.startswith("http"):
-            raise ConfigError(f"atlassian.site must be a full URL, got {site!r}")
-        return site
+        site = str(self._get("atlassian.site", default="") or "").rstrip("/")
+        if not site:
+            # Data Center installs often run Jira and Confluence on separate
+            # hosts, so the site is optional when both are given explicitly.
+            if self._get("atlassian.jira_url") and self._get("atlassian.confluence_url"):
+                return ""
+            raise ConfigError(
+                "atlassian.site is missing from config.toml. Set it to your Jira address, "
+                "or set atlassian.jira_url and atlassian.confluence_url if they live on "
+                "different hosts (INSTALL.md step 5)."
+            )
+        return _require_url("atlassian.site", site)
 
     @property
-    def atlassian_auth(self) -> tuple[str, str]:
-        email = os.environ.get("ATLASSIAN_EMAIL", "").strip()
-        token = os.environ.get("ATLASSIAN_API_TOKEN", "").strip()
-        if not email or not token:
+    def jira_url(self) -> str:
+        """Base URL that ``/rest/api`` and ``/rest/agile`` hang off."""
+        explicit = str(self._get("atlassian.jira_url", default="") or "").rstrip("/")
+        return _require_url("atlassian.jira_url", explicit) if explicit else self.atlassian_site
+
+    @property
+    def confluence_url(self) -> str:
+        """Base URL that Confluence's ``/rest/api`` hangs off.
+
+        Cloud serves Confluence under ``<site>/wiki``. Data Center serves it at
+        its own root, or under a context path such as ``/confluence``, which is
+        why it can be set outright.
+        """
+        explicit = str(self._get("atlassian.confluence_url", default="") or "").rstrip("/")
+        if explicit:
+            return _require_url("atlassian.confluence_url", explicit)
+        site = self.atlassian_site
+        return f"{site}/wiki" if self.atlassian_deployment == "cloud" else site
+
+    @property
+    def atlassian_deployment(self) -> str:
+        """``cloud`` or ``datacenter``. The two expose different REST APIs.
+
+        ``auto`` (the default) reads it off the host: ``*.atlassian.net`` is
+        Cloud, anything else is self-hosted.
+        """
+        value = str(self._get("atlassian.deployment", default="auto") or "auto").strip().lower()
+        aliases = {"dc": "datacenter", "data-center": "datacenter", "data_center": "datacenter",
+                   "server": "datacenter", "self-hosted": "datacenter"}
+        value = aliases.get(value, value)
+        if value in {"cloud", "datacenter"}:
+            return value
+        if value != "auto":
             raise ConfigError(
-                "ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN must be set in .env.\n"
-                "Create a token at: https://id.atlassian.com/manage-profile/security/api-tokens\n"
-                "See INSTALL.md step 4."
+                f"atlassian.deployment must be 'auto', 'cloud' or 'datacenter', got {value!r}."
             )
-        return email, token
+        explicit = self._get("atlassian.jira_url") or self._get("atlassian.confluence_url")
+        host = urlparse(str(explicit or self.atlassian_site)).hostname or ""
+        return "cloud" if host.endswith((".atlassian.net", ".jira.com")) else "datacenter"
+
+    def atlassian_headers(self, product: str) -> dict[str, str]:
+        """Auth headers for ``jira`` or ``confluence``.
+
+        Two schemes, chosen by ``atlassian.auth``:
+
+        * ``bearer`` -- a Data Center personal access token. ``JIRA_PAT`` /
+          ``CONFLUENCE_PAT`` win over the shared ``ATLASSIAN_PAT``.
+        * ``basic``  -- Cloud email + API token, or a Data Center username +
+          password, from ``ATLASSIAN_EMAIL`` (or ``ATLASSIAN_USERNAME``) and
+          ``ATLASSIAN_API_TOKEN``.
+
+        ``auto`` uses a PAT when one is set, and basic otherwise.
+        """
+        mode = str(self._get("atlassian.auth", default="auto") or "auto").strip().lower()
+        if mode not in {"auto", "basic", "bearer"}:
+            raise ConfigError(f"atlassian.auth must be 'auto', 'basic' or 'bearer', got {mode!r}.")
+
+        pat_var = f"{product.upper()}_PAT"
+        pat = _env(pat_var) or _env("ATLASSIAN_PAT")
+        if mode == "bearer" or (mode == "auto" and pat):
+            if not pat:
+                raise ConfigError(
+                    f"atlassian.auth is 'bearer' but neither {pat_var} nor ATLASSIAN_PAT is set "
+                    f"in .env. Create one in {product.title()} under Profile -> Personal Access "
+                    "Tokens. See INSTALL.md step 4."
+                )
+            return JSONClient.bearer(pat)
+
+        user = _env("ATLASSIAN_EMAIL") or _env("ATLASSIAN_USERNAME")
+        token = _env("ATLASSIAN_API_TOKEN")
+        if not user or not token:
+            if self.atlassian_deployment == "cloud":
+                hint = (
+                    "Set ATLASSIAN_EMAIL and ATLASSIAN_API_TOKEN in .env.\n"
+                    "Create a token at: https://id.atlassian.com/manage-profile/security/api-tokens"
+                )
+            else:
+                hint = (
+                    "This looks like Data Center. Set ATLASSIAN_PAT in .env (a personal access "
+                    "token from your Jira/Confluence profile), or ATLASSIAN_USERNAME and "
+                    "ATLASSIAN_API_TOKEN (your password) for basic auth."
+                )
+            raise ConfigError(f"No Atlassian credentials for {product}. {hint}\nSee INSTALL.md step 4.")
+        return JSONClient.basic_auth(user, token)
 
     # -- confluence --------------------------------------------------------
     @property

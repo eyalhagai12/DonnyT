@@ -86,3 +86,13 @@ for data, and link generously — an unlinked note is invisible in the graph.
 Keep the output private to the user. These notes are about a real person —
 report what the record shows, do not editorialise about their performance, and
 do not publish any of it to Confluence or GitLab.
+
+## If the donnyt tools are not available
+
+On a host where the `mcp` package could not be installed, the `donnyt_*`,
+`jira_*`, `gitlab_*`, `confluence_*` and `vault_*` tools do not exist -- but
+every one has an identical CLI command. Run `python -m donnyt.cli tools` for
+the mapping, then use the commands through the shell (from the repo root, with
+the repo's `.venv` Python). Same data, same rules: the confirm-before-sending
+steps above apply unchanged. Pass long Markdown (MR descriptions, notes,
+pages) with `--file <path>` rather than inline.

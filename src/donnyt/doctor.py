@@ -85,14 +85,17 @@ def run_checks() -> dict[str, Any]:
 
         api = type(mcp_server.mcp).__name__
         results.append(_check("mcp_package", OK, f"usable ({api})"))
-    except SystemExit as exc:
+    except SystemExit:
+        # Not a failure: without mcp the CLI is the whole toolkit.
         results.append(
             _check(
                 "mcp_package",
-                FAIL,
-                str(exc).splitlines()[0],
-                "pip install --no-index --find-links vendor/wheels mcp  (INSTALL.md step 3). "
-                "The CLI still works without it; only the MCP server needs it.",
+                SKIP,
+                "not installed -- CLI-only mode; every tool is `python -m donnyt.cli <command>` "
+                "(see `donnyt tools`)",
+                "To enable the MCP server, re-run the installer with -IndexUrl / --index-url "
+                "pointing at an internal package mirror, or ship a matching vendor/wheels "
+                "bundle (INSTALL.md step 3).",
             )
         )
     except Exception as exc:
@@ -109,6 +112,7 @@ def run_checks() -> dict[str, Any]:
         return _summarize(results)
 
     results.append(_check("config", OK, "config.toml parsed"))
+    results.append(_probe_atlassian(config))
 
     # -- live connectivity -------------------------------------------------
     results.append(_probe_confluence(config))
@@ -117,6 +121,23 @@ def run_checks() -> dict[str, Any]:
     results.append(_probe_vault(config))
 
     return _summarize(results)
+
+
+def _probe_atlassian(config: Any) -> dict[str, Any]:
+    """Which Atlassian flavour and auth scheme are in effect -- the two settings
+    most likely to be wrong on a self-hosted install."""
+    try:
+        deployment = config.atlassian_deployment
+        setting = str((config.raw.get("atlassian") or {}).get("deployment") or "auto")
+        scheme = config.atlassian_headers("jira")["Authorization"].split()[0].lower()
+        auth = "personal access token" if scheme == "bearer" else "basic (user + token)"
+        detail = (
+            f"{deployment} ({'auto-detected' if setting == 'auto' else 'set'}); "
+            f"jira {config.jira_url}; confluence {config.confluence_url}; auth {auth}"
+        )
+        return _check("atlassian", OK, detail)
+    except ConfigError as exc:
+        return _check("atlassian", FAIL, str(exc))
 
 
 def _probe_confluence(config: Any) -> dict[str, Any]:
@@ -147,9 +168,11 @@ def _probe_confluence(config: Any) -> dict[str, Any]:
             "confluence",
             FAIL,
             str(exc),
-            "Check atlassian.site in config.toml and ATLASSIAN_* in .env. If the host is "
-            "reachable only through a proxy, set HTTPS_PROXY; if TLS is intercepted, set "
-            "DONNYT_CA_BUNDLE to your corporate root certificate.",
+            f"Check the Confluence URL ({_safe(lambda: config.confluence_url)}) and the "
+            "credentials in .env. A 404 usually means the wrong atlassian.deployment or a "
+            "missing context path -- set atlassian.confluence_url to the address you open "
+            "Confluence at in a browser (e.g. https://wiki.corp or https://corp/confluence). "
+            "Behind a proxy set HTTPS_PROXY; if TLS is intercepted set DONNYT_CA_BUNDLE.",
         )
 
 
@@ -184,11 +207,37 @@ def _probe_jira(config: Any) -> dict[str, Any]:
 
         active = jira.active_sprint()
         sprint = f"active sprint '{active.name}'" if active else "no active sprint"
-        return _check("jira", OK, f"board {board_id} '{names[board_id]}'; {sprint}")
+        detail = f"board {board_id} '{names[board_id]}'; {sprint}"
+
+        # The story points field id differs per site, and a wrong one fails
+        # silently -- every issue just reads as unestimated.
+        fields = {f["id"]: f["name"] for f in jira.fields()}
+        points = config.story_points_field
+        if points not in fields:
+            guesses = [
+                f"{fid} ({name})" for fid, name in fields.items()
+                if "story point" in name.lower() or "estimate" in name.lower()
+            ]
+            return _check(
+                "jira",
+                FAIL,
+                f"{detail}; story points field {points!r} does not exist on this site",
+                "Set jira.story_points_field in config.toml"
+                + (f" -- likely one of: {', '.join(guesses[:4])}" if guesses else "")
+                + ".",
+            )
+        return _check("jira", OK, f"{detail}; points field {points} ({fields[points]})")
     except ConfigError as exc:
         return _check("jira", FAIL, str(exc))
     except Exception as exc:
-        return _check("jira", FAIL, str(exc), "Check jira.* in config.toml and ATLASSIAN_* in .env.")
+        return _check(
+            "jira",
+            FAIL,
+            str(exc),
+            f"Check the Jira URL ({_safe(lambda: config.jira_url)}), jira.* in config.toml and "
+            "the credentials in .env. A 404 on /rest/api/3 means this is Data Center: set "
+            "atlassian.deployment = \"datacenter\".",
+        )
 
 
 def _probe_gitlab(config: Any) -> dict[str, Any]:
@@ -229,6 +278,13 @@ def _probe_vault(config: Any) -> dict[str, Any]:
         return _check("vault", OK, f"{stats['total_notes']} notes at {stats['path']}")
     except Exception as exc:
         return _check("vault", FAIL, str(exc), "Check vault.path in config.toml.")
+
+
+def _safe(get: Any) -> str:
+    try:
+        return str(get())
+    except Exception:
+        return "unset"
 
 
 def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:

@@ -70,13 +70,14 @@ src/donnyt/
   _http.py        stdlib HTTP: basic auth, corporate CA bundles, proxies
   _html2md.py     Confluence storage format <-> Markdown
   config.py       .env + config.toml
-  confluence.py   pages, CQL search, the MR template
-  jira.py         issues, boards, sprints, velocity, workload
+  confluence.py   pages, CQL search, the MR template (Cloud + Data Center)
+  jira.py         issues, boards, sprints, velocity, workload (Cloud + Data Center)
   gitlab.py       merge requests, branch and ref comparison
   vault.py        Obsidian notes, frontmatter, links, managed blocks
   graph.py        turns Jira/GitLab facts into linked notes
-  mcp_server.py   28 MCP tools
-  cli.py          the same, from a terminal
+  ops.py          every operation, once -- both front ends call it
+  mcp_server.py   28 MCP tools over ops.py
+  cli.py          the same 28, from a terminal (`donnyt tools` maps them)
   doctor.py       preflight checks
 
 .claude/skills/   mr-write, sprint-plan, vault-sync
@@ -86,8 +87,13 @@ vendor/wheels/    offline install bundle
 
 **The core has no third-party dependencies.** HTTP is `urllib`, config is
 `tomllib`, HTML is `html.parser`. Only the MCP server needs a package (`mcp`),
-so if that cannot be installed on a locked-down host, the CLI still does the
-whole job.
+and it is optional: if the installer finds it in neither the bundled wheels nor
+an internal mirror, it installs in CLI-only mode, where every tool is a
+`python -m donnyt.cli` command and the skills use those instead.
+
+Works against Atlassian **Cloud or self-hosted Data Center**, with email +
+token or personal-access-token auth; `atlassian.deployment` picks the API, and
+defaults to working it out from the address.
 
 `donnyt` is deliberately **not** pip-installed: the installer links `src/` into
 the virtual environment, so edits take effect immediately and the offline

@@ -27,18 +27,26 @@ aspirational — it is the deployment target.
 | --- | --- |
 | `_http.py` | HTTP + auth + TLS/proxy handling. All network traffic goes here. |
 | `_html2md.py` | Confluence storage format ↔ Markdown. |
-| `config.py` | `.env` + `config.toml`. `repo_root()` handles the installed-vs-source split. |
-| `confluence.py` `jira.py` `gitlab.py` | Thin REST clients returning dataclasses. |
+| `config.py` | `.env` + `config.toml`. `repo_root()` handles the installed-vs-source split. Cloud vs Data Center, URLs and auth headers are resolved here. |
+| `confluence.py` `jira.py` `gitlab.py` | Thin REST clients returning dataclasses. Branch on `self.cloud` where Cloud and Data Center APIs differ. |
 | `vault.py` | Obsidian notes: frontmatter, links, managed blocks. |
 | `graph.py` | Domain layer — turns API facts into linked notes. |
-| `mcp_server.py` | Tool definitions. Thin wrappers; logic belongs below. |
-| `cli.py` | Terminal equivalent of every tool. |
+| `ops.py` | Every operation, once. Both front ends call it; expected failures raise `OpError(code, msg)`. |
+| `mcp_server.py` | Tool definitions over `ops`. One-line bodies; logic belongs in `ops` or below. |
+| `cli.py` | The same operations from a terminal. `TOOLS` maps each MCP tool to its command. |
 | `doctor.py` | Preflight checks. |
 
 ## Conventions
 
-- **Every MCP tool needs a CLI equivalent.** The CLI is the fallback when `mcp`
-  cannot be installed.
+- **Every MCP tool needs a CLI equivalent.** The CLI is the whole toolkit when
+  `mcp` cannot be installed, and the installer falls back to that CLI-only mode
+  on its own. A new tool means: the function in `ops.py`, the tool in
+  `mcp_server.py`, the subcommand and handler in `cli.py`, and its line in
+  `cli.TOOLS`.
+- **Support both Atlassian flavours.** Anything new against Jira or Confluence
+  must work on Cloud (`/rest/api/3`, Confluence `/api/v2`) and Data Center
+  (`/rest/api/2`, Confluence `/rest/api/content`). Use `self.api` / `self.cloud`
+  in the clients; never hardcode a host or version.
 - **Tool docstrings are the model's only documentation.** Say what the tool
   returns and when to reach for it, not just what it does.
 - **Errors are returned as data**, via `_guard` in `mcp_server.py`, so the model
@@ -78,7 +86,14 @@ python -m donnyt.cli doctor
 - `repo_root()` must not be derived from `__file__` alone; an installed copy
   lives in `site-packages`. It checks `DONNYT_HOME`, then the working directory,
   then the module path, keying off `config.example.toml`.
-- Jira sprints exist only in `/rest/agile/1.0`, not `/rest/api/3`.
+- Jira sprints exist only in `/rest/agile/1.0`, not `/rest/api/3`. It is the
+  same on Cloud and Data Center.
+- The board sprint list pages at 50 in id order; `JiraClient.sprints` pages
+  through all of them, or velocity silently reads the oldest sprints.
+- Cloud JQL search uses `/search/jql` with page tokens; Data Center only has
+  `/search` with `startAt`. `JiraClient.search` does both.
+- Data Center Confluence often lives under a context path (`/confluence`), and
+  its `_links.webui` is relative to that — build URLs from `config.confluence_url`.
 - `jira_add_to_sprint` batches at 50 — Jira's hard cap per call.
 - The `mcp` SDK renamed `FastMCP` to `MCPServer` in 2.0. `mcp_server.py`
   imports either.

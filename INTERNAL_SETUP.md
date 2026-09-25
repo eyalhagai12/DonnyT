@@ -230,14 +230,12 @@ python -m donnyt.cli jql "project = YOURKEY AND status = Done" --limit 3
 ```
 Look at the `points` field in the output for each issue. If it's `null` for
 issues you know had story points, `jira.story_points_field` in `config.toml`
-is wrong for your site. Find the right one:
-```
-python -m donnyt.cli jql "key = YOURKEY-1234"
-```
-won't show custom field ids directly — instead open, in a browser,
-`<your-site>/rest/api/3/issue/YOURKEY-1234?fields=*all` and search that page
-for the number you expect to see; the field name right above it (something
-like `customfield_10016`) is the value to put in `config.toml`.
+is wrong for your site. `python -m donnyt.cli doctor` checks the field exists
+and suggests the likely one if not. If the field exists but holds something
+else, open `<your-site>/rest/api/2/issue/YOURKEY-1234` in a browser (`/api/3/`
+on Cloud) and search that page for the number you expect to see; the field
+name right above it (something like `customfield_10002`) is the value to put
+in `config.toml`.
 
 ---
 

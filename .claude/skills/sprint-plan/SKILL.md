@@ -90,3 +90,13 @@ When asked to look back rather than forward:
    underestimated issue types, work blocked on other teams, interrupt load.
 4. `vault_record_decision` for anything the team decides to change, so the
    decision is linked to the people who made it.
+
+## If the donnyt tools are not available
+
+On a host where the `mcp` package could not be installed, the `donnyt_*`,
+`jira_*`, `gitlab_*`, `confluence_*` and `vault_*` tools do not exist -- but
+every one has an identical CLI command. Run `python -m donnyt.cli tools` for
+the mapping, then use the commands through the shell (from the repo root, with
+the repo's `.venv` Python). Same data, same rules: the confirm-before-sending
+steps above apply unchanged. Pass long Markdown (MR descriptions, notes,
+pages) with `--file <path>` rather than inline.

@@ -1,9 +1,11 @@
-"""Jira Cloud REST client, scoped to what sprint planning needs.
+"""Jira REST client, for Cloud and Data Center, scoped to sprint planning.
 
 Two APIs are in play and the split is not obvious from the outside:
 
-* ``/rest/api/3``   -- issues, JQL search, fields, users.
-* ``/rest/agile/1.0`` -- boards, sprints, backlog. Sprints only exist here.
+* ``/rest/api/3`` (Cloud) or ``/rest/api/2`` (Data Center) -- issues, JQL
+  search, fields. Data Center has no v3.
+* ``/rest/agile/1.0`` -- boards, sprints, backlog. Sprints only exist here, and
+  it is the same on both.
 """
 
 from __future__ import annotations
@@ -67,14 +69,19 @@ class Sprint:
 class JiraClient:
     def __init__(self, config: Config | None = None) -> None:
         self.config = config or load_config()
-        self.site = self.config.atlassian_site
-        email, token = self.config.atlassian_auth
-        self.http = JSONClient(self.site, headers=JSONClient.basic_auth(email, token))
+        self.site = self.config.jira_url
+        self.cloud = self.config.atlassian_deployment == "cloud"
+        self.api = "/rest/api/3" if self.cloud else "/rest/api/2"
+        self.http = JSONClient(self.site, headers=self.config.atlassian_headers("jira"))
         self.points_field = self.config.story_points_field
 
     # -- issues ------------------------------------------------------------
     def search(self, jql: str, limit: int = 100) -> list[Issue]:
-        """Run JQL. Uses the v3 enhanced search endpoint with token paging."""
+        """Run JQL, paging until ``limit``.
+
+        Cloud retired offset paging in favour of ``/search/jql`` with page
+        tokens; Data Center only has the offset form. Same results either way.
+        """
         fields = [
             "summary",
             "status",
@@ -94,22 +101,39 @@ class JiraClient:
                 "maxResults": min(100, limit - len(issues)),
                 "fields": fields,
             }
-            if next_token:
-                payload["nextPageToken"] = next_token
+            if self.cloud:
+                if next_token:
+                    payload["nextPageToken"] = next_token
+                data = self.http.post(f"{self.api}/search/jql", json_body=payload)
+            else:
+                payload["startAt"] = len(issues)
+                data = self.http.post(f"{self.api}/search", json_body=payload)
 
-            data = self.http.post("/rest/api/3/search/jql", json_body=payload)
             batch = data.get("issues", [])
             issues.extend(self._to_issue(raw) for raw in batch)
+            if not batch:
+                break
 
-            next_token = data.get("nextPageToken")
-            if data.get("isLast", True) or not next_token or not batch:
+            if self.cloud:
+                next_token = data.get("nextPageToken")
+                if data.get("isLast", True) or not next_token:
+                    break
+            elif len(issues) >= int(data.get("total", 0)):
                 break
 
         return issues[:limit]
 
     def get_issue(self, key: str) -> Issue:
-        data = self.http.get(f"/rest/api/3/issue/{key}")
+        data = self.http.get(f"{self.api}/issue/{key}")
         return self._to_issue(data)
+
+    def fields(self) -> list[dict[str, Any]]:
+        """Every field on the site, id and name -- for finding story points."""
+        data = self.http.get(f"{self.api}/field")
+        return [
+            {"id": f.get("id", ""), "name": f.get("name", "")}
+            for f in (data if isinstance(data, list) else [])
+        ]
 
     # -- boards and sprints ------------------------------------------------
     def boards(self) -> list[dict[str, Any]]:
@@ -122,12 +146,22 @@ class JiraClient:
         ]
 
     def sprints(self, board_id: int | None = None, state: str | None = None) -> list[Sprint]:
+        """Every sprint on the board, oldest first.
+
+        The endpoint pages at 50 in id order, so a single request on a long-lived
+        board returns only the oldest sprints -- page through all of them.
+        """
         board = board_id or self.config.jira_board_id
-        data = self.http.get(
-            f"/rest/agile/1.0/board/{board}/sprint",
-            params={"state": state, "maxResults": 50},
-        )
-        return [self._to_sprint(s) for s in data.get("values", [])]
+        found: list[Sprint] = []
+        while True:
+            data = self.http.get(
+                f"/rest/agile/1.0/board/{board}/sprint",
+                params={"state": state, "maxResults": 50, "startAt": len(found)},
+            )
+            batch = data.get("values", [])
+            found.extend(self._to_sprint(s) for s in batch)
+            if data.get("isLast", True) or not batch:
+                return found
 
     def active_sprint(self, board_id: int | None = None) -> Sprint | None:
         found = self.sprints(board_id, state="active")

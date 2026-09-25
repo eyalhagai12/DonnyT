@@ -10,9 +10,32 @@
 # ===========================================================================
 
 [atlassian]
-# Your Atlassian Cloud site, no trailing slash.
-# Find it in the browser address bar when you open Jira or Confluence.
+# Your Jira address, no trailing slash -- copy it from the browser address bar.
+#   Cloud:        https://your-team.atlassian.net
+#   Data Center:  https://jira.yourcompany.internal
 site = "https://your-team.atlassian.net"
+
+# Cloud and self-hosted (Server / Data Center) speak different REST APIs.
+#   "auto"        -- *.atlassian.net is Cloud, any other host is Data Center
+#   "cloud"       -- force Cloud
+#   "datacenter"  -- force Data Center
+# `donnyt doctor` prints which one is in effect.
+deployment = "auto"
+
+# Data Center often runs Jira and Confluence on separate hosts, or Confluence
+# under a context path. Set these to the addresses you open in a browser;
+# leave empty to derive them from `site` (Cloud: <site>/wiki).
+#   jira_url       = "https://jira.yourcompany.internal"
+#   confluence_url = "https://wiki.yourcompany.internal"      # or .../confluence
+jira_url = ""
+confluence_url = ""
+
+# How to sign in. Credentials themselves go in .env.
+#   "auto"    -- a personal access token (ATLASSIAN_PAT) when one is set,
+#                otherwise email/username + token
+#   "bearer"  -- Data Center personal access token
+#   "basic"   -- Cloud email + API token, or Data Center username + password
+auth = "auto"
 
 
 [confluence]
@@ -41,10 +64,9 @@ project_key = "TEAM"
 # `donnyt doctor` lists the available board ids if you get this wrong.
 board_id = 0
 
-# Story points field id. customfield_10016 is the Jira Cloud default.
-# To confirm: open any estimated issue and check
-#   <site>/rest/api/3/issue/TEAM-1234?fields=*all
-# for the custom field holding the point value.
+# Story points field id. customfield_10016 is the usual Jira Cloud id; Data
+# Center sites vary (often customfield_10002 or 10106). `donnyt doctor` checks
+# it exists and suggests the right one if not.
 story_points_field = "customfield_10016"
 
 # Statuses that count as finished when measuring velocity. Match your

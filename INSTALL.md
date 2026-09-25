@@ -20,11 +20,17 @@ There are two roles. Read the one you are doing.
 | | Requirement | Why | How to check |
 | --- | --- | --- | --- |
 | **Required** | **Python 3.11 or newer** | Config is read with `tomllib`, added in 3.11 | `python --version` |
-| **Required** | Network access to your **Jira/Confluence** host | Reading sprints and templates | `curl -I https://your-team.atlassian.net` |
+| **Required** | Network access to your **Jira/Confluence** hosts. Cloud or self-hosted Data Center both work | Reading sprints and templates | `curl -I https://jira.yourcompany.internal` |
 | **Required** | Network access to your **GitLab** host | Reading and creating MRs | `curl -I https://gitlab.internal.corp` |
-| **Required** | **Claude Code** | Runs the skills and the MCP server | `claude --version` |
+| **Required** | **Claude Code** | Runs the skills | `claude --version` |
 | Optional | **git** | Reading local branches for MR descriptions | `git --version` |
 | Optional | **Obsidian** | Viewing the knowledge graph. The vault is plain Markdown and works without it | — |
+| Optional | The **`mcp`** Python package, from the zip's bundle *or* an internal package mirror | Exposes the tools to Claude Code as MCP tools. **Without it everything still works** through the CLI | — |
+
+> **You do not need to know in advance what the internal network has.** The
+> installer tries the bundled wheels, then an internal package mirror, and if
+> neither provides `mcp` it installs in **CLI-only mode**: every tool is then
+> `python -m donnyt.cli <command>`, and the skills switch to that on their own.
 
 > **No internet is required**, but the machine *must* reach your internal Jira,
 > Confluence and GitLab hosts. This toolkit talks to those over HTTPS. If they
@@ -37,13 +43,15 @@ them from a machine that can reach the relevant site.
 
 | Credential | Where to create it | Scopes / permissions |
 | --- | --- | --- |
-| **Atlassian API token** (covers both Confluence and Jira) | `https://id.atlassian.com/manage-profile/security/api-tokens` → **Create API token** | Inherits your own permissions. You must be able to see the board and the template page. |
+| **Atlassian Cloud:** API token (covers both Confluence and Jira) | `https://id.atlassian.com/manage-profile/security/api-tokens` → **Create API token** | Inherits your own permissions. You must be able to see the board and the template page. |
+| **Atlassian Data Center:** personal access token(s) | In Jira and in Confluence: avatar → **Profile** → **Personal Access Tokens** | Inherits your permissions. Jira and Confluence each issue their own. |
 | **GitLab personal access token** | `<your-gitlab>/-/user_settings/personal_access_tokens` | **`api`** and **`read_repository`** |
 
-> The Atlassian token is shown **once**. Copy it immediately.
+> Tokens are shown **once**. Copy them immediately.
 >
-> Self-hosted Jira/Confluence (Data Center, not Cloud) uses a Personal Access
-> Token from your profile instead — see [Troubleshooting](#troubleshooting).
+> Not sure which Atlassian you have? If the address ends in `.atlassian.net`,
+> it is Cloud. Anything else (`jira.yourcompany.internal`, an IP address, a
+> `/jira` path) is Data Center.
 
 ### Ids you will need
 
@@ -51,9 +59,10 @@ Collect these before step 5; each is visible in a URL.
 
 | Setting | Where to find it | Example |
 | --- | --- | --- |
-| `atlassian.site` | Address bar on any Jira or Confluence page | `https://acme.atlassian.net` |
-| `confluence.space` | Page URL: `/wiki/spaces/`**`ENG`**`/pages/...` | `ENG` |
-| `confluence.mr_template_page_id` | Page URL: `/pages/`**`123456789`**`/MR+Template` | `123456789` |
+| `atlassian.site` | Address bar on any Jira page | `https://acme.atlassian.net` or `https://jira.corp.internal` |
+| `atlassian.confluence_url` | Data Center only, when Confluence has its own host or path | `https://wiki.corp.internal` |
+| `confluence.space` | Page URL: `/spaces/`**`ENG`**`/...`, or `spaceKey=ENG` | `ENG` |
+| `confluence.mr_template_page_id` | Cloud page URL: `/pages/`**`123456789`**`/MR+Template`. Data Center: **⋯ → Page Information**, the `pageId=` in the URL | `123456789` |
 | `jira.project_key` | The prefix on any issue: **`TEAM`**`-1234` | `TEAM` |
 | `jira.board_id` | Board URL: `/boards/`**`42`** | `42` |
 | `gitlab.default_project` | The path after the host | `platform/backend/api` |
@@ -73,26 +82,28 @@ git clone <this-repo> DonnyT
 cd DonnyT
 ```
 
-### A2. Download the dependencies
+### A2. Download the dependencies (optional, recommended)
+
+The bundle lets the MCP server install with no network at all. It is optional:
+without it, the installer tries an internal package mirror, then falls back to
+CLI-only mode. It is still the one route that needs nothing from the inside.
+
+**Don't know the isolated machine's OS or Python version?** Bundle for all the
+likely ones. pip picks the matching wheels at install time:
 
 ```bash
-python scripts/build_offline_bundle.py
+python scripts/build_offline_bundle.py --clean --preset common
 ```
 
-This fills `vendor/wheels/` with the `mcp` package and its dependency tree
-(~30 packages, ~15 MB) and writes a `MANIFEST.txt` recording what was bundled
-and for which platform.
+`common` covers Windows and Linux (x86-64) on Python 3.11, 3.12 and 3.13.
+`--preset windows` or `--preset linux` narrow it. If you do know the target,
+name it. A target is `PLATFORM[,PLATFORM...]:PYTHON_VERSION`:
 
-> **Wheels are platform-specific.** If the isolated machine runs a different OS
-> or Python version than this one, say so explicitly:
->
-> ```bash
-> # isolated machine is Windows on Python 3.11
-> python scripts/build_offline_bundle.py --platform win_amd64 --python-version 3.11
->
-> # isolated machine is Linux on Python 3.11
-> python scripts/build_offline_bundle.py --platform manylinux2014_x86_64 --python-version 3.11
-> ```
+```bash
+python scripts/build_offline_bundle.py --clean --target win_amd64:3.11
+```
+
+This fills `vendor/wheels/` and writes a `MANIFEST.txt` recording the targets.
 
 ### A3. Prove the bundle works offline
 
@@ -101,8 +112,9 @@ python scripts/build_offline_bundle.py --check
 ```
 
 This installs the bundle with `--no-index` into a throwaway virtual
-environment. It must print `offline bundle OK`. Do not ship a bundle that
-fails this check — you will not get a second chance once it is across.
+environment (when it fits this machine), then proves every target in the
+manifest resolves offline. Every target line must read `OK`. Do not ship a
+bundle that fails this check.
 
 ### A4. Zip it
 
@@ -189,16 +201,39 @@ chmod +x install.sh
 ./install.sh
 ```
 
+**If the internal network has a package mirror** (Artifactory, Nexus, devpi…),
+point the installer at it. It is only used if the bundle doesn't fit:
+
+```powershell
+.\install.ps1 -IndexUrl https://artifactory.corp/api/pypi/pypi/simple
+```
+```bash
+./install.sh --index-url https://artifactory.corp/api/pypi/pypi/simple
+```
+
+If pip on that machine is already set up for the mirror (`pip.ini` /
+`pip.conf`, or `PIP_INDEX_URL`), you don't need to pass anything. For a mirror
+behind a private CA, set `PIP_CERT` to the CA file first.
+
+| `-Source` / `--source` | Behaviour |
+| --- | --- |
+| `auto` (default) | Bundle, then mirror, then CLI-only. Never fails for want of `mcp`. |
+| `bundle` | Bundle only; fail if it doesn't fit. |
+| `index` | Mirror only; fail if it doesn't have `mcp`. |
+| `none` | Skip `mcp`; CLI-only. |
+
 The installer:
 
 1. finds Python 3.11+,
 2. creates `.venv`,
-3. installs `mcp` from `vendor/wheels` with **no network access**,
+3. installs `mcp` from the bundle or the mirror. If neither has it, it
+   continues in **CLI-only mode** and says so,
 4. links `src/` into the environment, so your edits to this repo take effect
    with no reinstall,
 5. copies `.env.example` → `.env` and `config.example.toml` → `config.toml`
    (**never overwriting** ones that already exist),
-6. generates `.mcp.json` so Claude Code can start the server,
+6. generates `.mcp.json` so Claude Code can start the server (skipped in
+   CLI-only mode, because a server that can't start is worse than none),
 7. runs the doctor.
 
 It is safe to re-run at any time. Add `-Force` / `--force` to rebuild `.venv`
@@ -209,13 +244,24 @@ credentials yet. That is steps 4 and 5.
 
 ### Step 4 — Add your credentials
 
-Open `.env` and fill in the three values:
+Open `.env`. For **Atlassian Cloud**:
 
 ```ini
 ATLASSIAN_EMAIL=you@yourcompany.com
 ATLASSIAN_API_TOKEN=ATATT3xFfGF0...
 GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
 ```
+
+For **Data Center**, use a personal access token instead. Either one shared
+value, or one per product if Jira and Confluence issued different tokens:
+
+```ini
+ATLASSIAN_PAT=NjM4OTk...          # or JIRA_PAT=... and CONFLUENCE_PAT=...
+GITLAB_TOKEN=glpat-xxxxxxxxxxxxxxxxxxxx
+```
+
+An old Server install without personal access tokens can use basic auth:
+`ATLASSIAN_USERNAME`, plus your password in `ATLASSIAN_API_TOKEN`.
 
 Where these come from is in [Credentials](#credentials-you-will-need) above.
 
@@ -232,7 +278,7 @@ value. At minimum set:
 
 ```toml
 [atlassian]
-site = "https://acme.atlassian.net"
+site = "https://acme.atlassian.net"     # or https://jira.corp.internal
 
 [confluence]
 space = "ENG"
@@ -247,19 +293,30 @@ url = "https://gitlab.internal.corp"
 default_project = "platform/backend/api"
 ```
 
+**Data Center with Confluence on its own host or path?** Add:
+
+```toml
+[atlassian]
+site = "https://jira.corp.internal"
+confluence_url = "https://wiki.corp.internal"     # or https://corp.internal/confluence
+```
+
+`deployment = "auto"` works out Cloud vs Data Center from the address. Set it
+to `"cloud"` or `"datacenter"` only if the doctor gets it wrong.
+
 Then list your team. This drives capacity planning and connects Jira and GitLab
 identities to the person notes in the vault:
 
 ```toml
 [[team.members]]
 name = "Maya Cohen"        # MUST match their Jira display name exactly
-jira = "5f8a1c2d3e4b5a6c"  # accountId
+jira = "5f8a1c2d3e4b5a6c"  # Cloud accountId, or Data Center username
 gitlab = "mcohen"
 capacity = 8               # story points per full sprint
 ```
 
-Find a Jira `accountId` at:
-`<site>/rest/api/3/user/search?query=their@email.com`
+Find a Cloud `accountId` at `<site>/rest/api/3/user/search?query=their@email.com`.
+On Data Center it is the username shown on their profile.
 
 > `name` must match the Jira display name **exactly**, or assignees will not
 > resolve to the right person note.
@@ -282,14 +339,16 @@ Every check should pass:
 [ok]   config.toml      found
 [ok]   mcp_package      usable (MCPServer)
 [ok]   config           config.toml parsed
+[ok]   atlassian        datacenter (auto-detected); jira https://jira.corp.internal; confluence https://wiki.corp.internal; auth personal access token
 [ok]   confluence       authenticated as You; MR template 'Merge Request Template' (id 123456789)
-[ok]   jira             board 42 'TEAM board'; active sprint 'Sprint 14'
+[ok]   jira             board 42 'TEAM board'; active sprint 'Sprint 14'; points field customfield_10002 (Story Points)
 [ok]   gitlab           authenticated as @you; project platform/backend/api
 [ok]   vault            1 notes at ...\vault
 ```
 
-Each failure names the exact setting or credential at fault. Work through them
-before moving on — see [Troubleshooting](#troubleshooting).
+In CLI-only mode, `mcp_package` reads `[--]` (skipped) instead of `[ok]`. That
+is fine. Each failure names the exact setting or credential at fault. Work
+through them before moving on. See [Troubleshooting](#troubleshooting).
 
 ### Step 7 — Connect Claude Code
 
@@ -301,6 +360,10 @@ claude
 Claude Code finds `.mcp.json` and asks to approve the `donnyt` MCP server.
 Approve it. Confirm with `/mcp` — you should see `donnyt` connected with 28
 tools.
+
+**CLI-only mode:** there is no server to approve. The skills notice the tools
+are missing and run `python -m donnyt.cli` commands instead; allow them when
+Claude Code asks. `python -m donnyt.cli tools` lists every command.
 
 Then try:
 
@@ -357,18 +420,36 @@ Confirm the host is reachable at all before blaming the toolkit:
 curl -I https://your-team.atlassian.net
 ```
 
-### Offline install failed / `No matching distribution found`
+### `The bundle does not fit this machine` / `No matching distribution found`
 
-The bundle does not match this machine. Check
-`vendor/wheels/MANIFEST.txt` — it records the target platform and Python
-version it was built for. Rebuild it on a connected machine with matching
-`--platform` and `--python-version` (Part A, step A2).
+The bundle was built for other Python versions or operating systems;
+`vendor/wheels/MANIFEST.txt` lists its targets. With the default
+`-Source auto` this isn't fatal: the installer moves on to the mirror, then to
+CLI-only mode. To get the MCP server, either point the installer at a mirror
+(`-IndexUrl`), or rebuild the bundle with `--preset common` or a matching
+`--target` (Part A, step A2).
 
 ### `HTTP 401` from Confluence or Jira
 
-The token is wrong, expired, or paired with the wrong email. `ATLASSIAN_EMAIL`
-must be the account the token was minted under. Regenerate and re-paste —
-tokens are easy to truncate on copy.
+**Cloud:** the token is wrong, expired, or paired with the wrong email.
+`ATLASSIAN_EMAIL` must be the account the token was minted under. Regenerate
+and re-paste; tokens are easy to truncate on copy.
+
+**Data Center:** the personal access token is wrong or expired, or one
+product's token is being used for both. Jira and Confluence issue separate
+tokens, so set `JIRA_PAT` and `CONFLUENCE_PAT`. If PATs are disabled on your
+instance, use basic auth instead: `ATLASSIAN_USERNAME`, your password in
+`ATLASSIAN_API_TOKEN`, and `atlassian.auth = "basic"`.
+
+### `HTTP 404` from Jira or Confluence on every call
+
+Either the wrong API flavour or a missing context path. Check the doctor's
+`atlassian` line:
+
+- It says `cloud` but you are self-hosted: set `atlassian.deployment = "datacenter"`.
+- Confluence lives under a path (`https://corp.internal/confluence`) or on
+  another host: set `atlassian.confluence_url` to the address you open in a
+  browser, without the page part. The same goes for `atlassian.jira_url`.
 
 ### `HTTP 403` from GitLab
 
@@ -383,21 +464,16 @@ numeric id from the URL.
 
 ### Story points always come back `null`
 
-`jira.story_points_field` does not match your site. Find the right id:
+`jira.story_points_field` does not match your site. The doctor checks this and
+suggests the likely field. To look it up yourself, open
+`<site>/rest/api/2/field` (Data Center) or `<site>/rest/api/3/field` (Cloud)
+and search the page for "Story Points".
 
-```
-<site>/rest/api/3/issue/TEAM-1234?fields=*all
-```
+### Claude Code shows `donnyt` as failed
 
-Look for the custom field holding the point value and put its id in
-`config.toml`.
-
-### Self-hosted Jira / Confluence (Data Center)
-
-The REST paths differ from Cloud. `src/donnyt/confluence.py` and
-`src/donnyt/jira.py` target the Cloud APIs (`/wiki/api/v2`, `/rest/api/3`,
-`/rest/agile/1.0`). Data Center uses `/rest/api/content` and has no
-`/rest/api/3`. Adapting is a contained change in those two files.
+The server can't start, usually because `mcp` was removed or `.venv` was
+rebuilt without it. Re-run the installer. In CLI-only mode it removes
+`.mcp.json`, so the skills fall back to the CLI.
 
 ### Claude Code does not see the server
 
@@ -412,7 +488,8 @@ move the folder, re-run the installer.
 
 ### Nothing works and you need to get going
 
-The CLI needs no MCP package at all — it is pure standard library:
+The CLI needs no MCP package at all. It is pure standard library, and it
+covers every tool:
 
 ```bash
 python -m donnyt.cli doctor
@@ -421,6 +498,7 @@ python -m donnyt.cli velocity
 python -m donnyt.cli sync
 ```
 
+`python -m donnyt.cli tools` maps each MCP tool to its command, and
 `python -m donnyt.cli --help` lists everything.
 
 ---

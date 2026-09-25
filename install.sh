@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 # Install DonnyT on this machine. Works with no internet access.
 #
-# Creates a virtual environment, installs from the bundled wheels in
-# vendor/wheels, seeds .env and config.toml, generates .mcp.json for Claude
-# Code, and runs the doctor. Safe to re-run.
+# Creates a virtual environment, installs the one optional dependency ('mcp'),
+# seeds .env and config.toml, generates .mcp.json for Claude Code, and runs the
+# doctor. Safe to re-run.
 #
-#   ./install.sh            offline install from vendor/wheels
-#   ./install.sh --online   allow PyPI (connected machines only)
-#   ./install.sh --force    rebuild the virtual environment
+# 'mcp' is looked for in vendor/wheels, then in a package index (--index-url,
+# DONNYT_INDEX_URL, or pip's own config). If neither has it the install still
+# succeeds in CLI-only mode: every tool works as `python -m donnyt.cli ...`.
+#
+#   ./install.sh                         use whatever is available
+#   ./install.sh --index-url URL         install mcp from an internal mirror
+#   ./install.sh --source bundle|index   use only that source; fail if it fails
+#   ./install.sh --source none           skip mcp, CLI-only
+#   ./install.sh --online                allow PyPI (connected machines only)
+#   ./install.sh --force                 rebuild the virtual environment
 
 set -euo pipefail
 
@@ -15,20 +22,30 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 VENV="$ROOT/.venv"
 WHEELS="$ROOT/vendor/wheels"
 
-ONLINE=0
+SOURCE="auto"
+INDEX_URL="${DONNYT_INDEX_URL:-}"
+MCP_SPEC="mcp>=1.2"
 FORCE=0
 PYTHON_BIN=""
 
 while [ $# -gt 0 ]; do
     case "$1" in
-        --online) ONLINE=1 ;;
-        --force)  FORCE=1 ;;
-        --python) PYTHON_BIN="$2"; shift ;;
-        -h|--help) sed -n '2,12p' "$0"; exit 0 ;;
+        --source)    SOURCE="$2"; shift ;;
+        --index-url) INDEX_URL="$2"; shift ;;
+        --mcp-spec)  MCP_SPEC="$2"; shift ;;
+        --online)    SOURCE="index"; INDEX_URL="" ;;
+        --force)     FORCE=1 ;;
+        --python)    PYTHON_BIN="$2"; shift ;;
+        -h|--help) sed -n '2,19p' "$0"; exit 0 ;;
         *) echo "Unknown option: $1" >&2; exit 1 ;;
     esac
     shift
 done
+
+case "$SOURCE" in
+    auto|bundle|index|none) ;;
+    *) echo "--source must be auto, bundle, index or none (got '$SOURCE')" >&2; exit 1 ;;
+esac
 
 C_CYAN=$'\033[36m'; C_GREEN=$'\033[32m'; C_YELLOW=$'\033[33m'; C_RED=$'\033[31m'; C_OFF=$'\033[0m'
 step() { printf '\n%s[%s] %s%s\n' "$C_CYAN" "$1" "$2" "$C_OFF"; }
@@ -76,37 +93,65 @@ else
 fi
 
 # --- 3. Install dependencies ------------------------------------------------
-step 3 "Installing dependencies"
+step 3 "Installing the MCP dependency (optional)"
 
 # donnyt itself is never installed as a package -- the .pth file below points
 # at src/, so edits to this repo take effect with no reinstall. Only the MCP
-# server's dependency needs installing.
+# server's dependency needs installing, and even that is optional.
 wheel_count=0
 [ -d "$WHEELS" ] && wheel_count=$(find "$WHEELS" -name '*.whl' 2>/dev/null | wc -l | tr -d ' ')
-mcp_ready=0
 
-if [ "$ONLINE" -eq 1 ]; then
-    warn "Online mode: installing 'mcp' from PyPI"
-    "$VENV_PY" -m pip install --quiet --upgrade pip
-    "$VENV_PY" -m pip install --quiet "mcp>=1.2" && mcp_ready=1
-elif [ "$wheel_count" -gt 0 ]; then
-    ok "Offline mode: $wheel_count wheels in vendor/wheels"
-    if "$VENV_PY" -m pip install --quiet --no-index --find-links "$WHEELS" "mcp>=1.2"; then
-        mcp_ready=1
-    else
-        err "Offline install failed. The bundle may not match this machine's Python or OS."
-        err "Check vendor/wheels/MANIFEST.txt, then rebuild it on a connected machine:"
-        err "    python scripts/build_offline_bundle.py --platform manylinux2014_x86_64 --python-version 3.11"
-        exit 1
+install_from_bundle() {
+    if [ "$wheel_count" -eq 0 ]; then
+        warn "No offline bundle: vendor/wheels is empty."
+        return 1
     fi
+    ok "Trying the offline bundle ($wheel_count wheels in vendor/wheels)"
+    if "$VENV_PY" -m pip install --quiet --disable-pip-version-check --no-index --find-links "$WHEELS" "$MCP_SPEC"; then
+        return 0
+    fi
+    warn "The bundle does not fit this machine's Python/OS (see vendor/wheels/MANIFEST.txt)."
+    return 1
+}
+
+install_from_index() {
+    local args=(-m pip install --quiet --disable-pip-version-check --timeout 15 --retries 1)
+    if [ -n "$INDEX_URL" ]; then
+        ok "Trying package index $INDEX_URL"
+        args+=(--index-url "$INDEX_URL")
+        # Plain-http mirrors are common inside; pip refuses them unless trusted.
+        case "$INDEX_URL" in
+            http://*) host="${INDEX_URL#http://}"; args+=(--trusted-host "${host%%[/:]*}") ;;
+        esac
+    else
+        ok "Trying pip's configured index (pip.conf / PIP_INDEX_URL, else PyPI)"
+    fi
+    if "$VENV_PY" "${args[@]}" "$MCP_SPEC"; then
+        return 0
+    fi
+    warn "The package index did not provide '$MCP_SPEC'."
+    return 1
+}
+
+mcp_ready=0
+case "$SOURCE" in
+    bundle) install_from_bundle && mcp_ready=1 ;;
+    index)  install_from_index && mcp_ready=1 ;;
+    auto)   { install_from_bundle || install_from_index; } && mcp_ready=1 ;;
+    none)   ok "Skipped (--source none)" ;;
+esac
+
+if [ "$mcp_ready" -eq 1 ]; then
+    ok "MCP dependency installed"
+elif [ "$SOURCE" = "bundle" ] || [ "$SOURCE" = "index" ]; then
+    err "Could not install '$MCP_SPEC' from the requested source ($SOURCE)."
+    err "Re-run with --source auto to fall back to CLI-only mode, or see INSTALL.md step 3."
+    exit 1
 else
-    warn "vendor/wheels is empty - no offline bundle shipped with this copy."
-    warn "The CLI will work; the MCP server will not."
-    warn "To enable it, run this on a connected machine:"
-    warn "    python scripts/build_offline_bundle.py"
-    warn "then re-zip, copy across, and re-run this installer."
+    warn "Continuing in CLI-only mode: every tool works as 'python -m donnyt.cli <command>'."
+    warn "To add the MCP server later, re-run with --index-url <mirror>, or ship a"
+    warn "vendor/wheels bundle built for this machine (INSTALL.md step A2)."
 fi
-[ "$mcp_ready" -eq 1 ] && ok "MCP dependency installed"
 
 # Put src/ on the interpreter's path so `python -m donnyt.cli` just works.
 SITE_PACKAGES="$("$VENV_PY" -c 'import sysconfig; print(sysconfig.get_paths()["purelib"])')"
@@ -133,6 +178,12 @@ seed "config.example.toml" "config.toml"
 # --- 5. Generate .mcp.json --------------------------------------------------
 step 5 "Registering the MCP server for Claude Code"
 
+if [ "$mcp_ready" -eq 0 ]; then
+    # A server entry that cannot start is worse than none: Claude Code would
+    # report a broken server instead of the skills falling back to the CLI.
+    rm -f "$ROOT/.mcp.json"
+    warn "Skipped - no 'mcp' package. The skills will drive the CLI instead."
+else
 "$VENV_PY" - "$ROOT" "$VENV_PY" <<'PYEOF'
 import json, sys
 from pathlib import Path
@@ -146,6 +197,7 @@ config = {"mcpServers": {"donnyt": {"command": venv_python,
 (root / ".mcp.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
 PYEOF
 ok "Wrote .mcp.json pointing at $VENV_PY"
+fi
 
 # --- 6. Doctor --------------------------------------------------------------
 step 6 "Running the doctor"

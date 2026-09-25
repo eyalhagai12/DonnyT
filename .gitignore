@@ -28,3 +28,7 @@ vault/.trash/
 # --- scratch ---
 .scratch/
 *.log
+
+# --- local devstack: credentials, tokens, throwaway vault (never commit) ---
+test/devstack/donnyt/
+test/devstack/.env

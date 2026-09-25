@@ -12,7 +12,6 @@ import re
 from datetime import date
 from typing import Any
 
-from .confluence import ConfluenceClient
 from .config import Config, load_config
 from .gitlab import GitLabClient, MergeRequest
 from .jira import Issue, JiraClient, Sprint
@@ -265,16 +264,3 @@ class GraphBuilder:
 
         written["people"] = [n.title for n in self.vault.notes("person")]
         return {"written": written, "stats": self.vault.stats()}
-
-
-def fetch_mr_template(config: Config | None = None) -> dict[str, Any]:
-    """The Confluence MR template, as Markdown, with its section headings listed."""
-    client = ConfluenceClient(config)
-    page = client.get_template()
-    markdown = page.markdown
-    sections = re.findall(r"^#{1,6}\s+(.+)$", markdown, flags=re.M)
-    return {
-        "page": page.summary(),
-        "markdown": markdown,
-        "sections": sections,
-    }
