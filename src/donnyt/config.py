@@ -259,6 +259,11 @@ class Config:
         return str(self._get("jira.story_points_field", default="customfield_10016"))
 
     @property
+    def epic_link_field(self) -> str:
+        """Data Center's Epic Link field id. Empty means find it by name; Cloud uses ``parent``."""
+        return str(self._get("jira.epic_link_field", default="") or "")
+
+    @property
     def done_statuses(self) -> list[str]:
         return [str(s) for s in self._get("jira.done_statuses", default=["Done", "Closed", "Resolved"])]
 

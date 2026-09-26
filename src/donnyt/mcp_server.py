@@ -130,7 +130,12 @@ def confluence_publish(
 
 @mcp.tool()
 def jira_search(jql: str, limit: int = 50) -> Any:
-    """Run a JQL query and return matching issues."""
+    """Run a JQL query and return matching issues.
+
+    Each issue's `parent` is its epic (or parent issue) key on both Cloud and
+    Data Center. To list an epic's children, query `parent = TEAM-1` on Cloud
+    and `"Epic Link" = TEAM-1` on Data Center.
+    """
     return _guard(ops.jira_search, jql, limit)
 
 
@@ -157,7 +162,11 @@ def jira_sprint_issues(sprint_id: int = 0) -> Any:
 
 @mcp.tool()
 def jira_backlog(limit: int = 60) -> Any:
-    """Board backlog in rank order -- the candidate pool for the next sprint."""
+    """Board backlog in rank order -- the candidate pool for the next sprint.
+
+    Each issue's `parent` is the epic it belongs to, so a sprint can be built
+    around one epic by filtering on it.
+    """
     return _guard(ops.jira_backlog, limit)
 
 
@@ -190,6 +199,29 @@ def jira_create_sprint(name: str, start: str = "", end: str = "", goal: str = ""
 def jira_add_to_sprint(sprint_id: int, issue_keys: list[str]) -> Any:
     """Move issues into a sprint. Batched automatically past Jira's 50-issue cap."""
     return _guard(ops.jira_add_to_sprint, sprint_id, issue_keys)
+
+
+@mcp.tool()
+def jira_update_sprint(sprint_id: int, name: str = "", goal: str = "", start: str = "", end: str = "") -> Any:
+    """Change an existing sprint's name, goal or dates (ISO `YYYY-MM-DD`). Team-visible: confirm first.
+
+    Empty arguments are left as they are. Use it to give a planned sprint its
+    goal when the sprint already exists; `jira_create_sprint` only sets one on
+    creation. Returns the updated sprint.
+    """
+    return _guard(ops.jira_update_sprint, sprint_id, name, goal, start, end)
+
+
+@mcp.tool()
+def jira_assign(issue_keys: list[str], assignee: str) -> Any:
+    """Assign issues to one team member. Team-visible: confirm first.
+
+    `assignee` is a name, Jira id or GitLab username from the team roster in
+    config.toml; "unassigned" clears the assignee. Fails with `unknown_member`
+    for anyone not in the roster, so only planned team members get work.
+    Returns the member's name and the issues assigned.
+    """
+    return _guard(ops.jira_assign, issue_keys, assignee)
 
 
 # ------------------------------------------------------------------- gitlab

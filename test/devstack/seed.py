@@ -202,7 +202,10 @@ def seed_gitlab() -> None:
 JIRA = "http://127.0.0.1:8080"
 KEY = "TEAM"
 
-PEOPLE = [("maya", "Maya Cohen", 8), ("dan", "Dan Levi", 8), ("noa", "Noa Katz", 6)]
+PEOPLE = [
+    ("maya", "Maya Cohen", 8), ("dan", "Dan Levi", 8), ("noa", "Noa Katz", 6),
+    ("omer", "Omer Shapiro", 8), ("lior", "Lior Ben-David", 6), ("tamar", "Tamar Adler", 4),
+]
 
 # Two-week sprints. 1-4 are closed history, 5 is in flight, 6 is next.
 SPRINTS = [
@@ -274,9 +277,12 @@ def seed_jira() -> dict[str, object]:
             api("DELETE", f"/rest/agile/1.0/board/{board['id']}")
         ok(api("DELETE", f"/rest/api/2/project/{KEY}"), "delete old project")
         print(f"  removed the previous {KEY} project")
+    # Default new issues to unassigned, not the project lead -- otherwise every
+    # backlog item looks like the admin's work. (Jira 10 allows unassigned
+    # issues out of the box; its REST API does not expose that switch.)
     ok(api("POST", "/rest/api/2/project", {
         "key": KEY, "name": "Team Orders", "lead": "admin",
-        "projectTypeKey": "software",
+        "projectTypeKey": "software", "assigneeType": "UNASSIGNED",
         "projectTemplateKey": "com.pyxis.greenhopper.jira:gh-scrum-template",
     }), "create project")
 

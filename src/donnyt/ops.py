@@ -179,6 +179,45 @@ def jira_add_to_sprint(sprint_id: int, issue_keys: list[str]) -> dict[str, Any]:
     return JiraClient().move_issues_to_sprint(sprint_id, issue_keys)
 
 
+def jira_update_sprint(
+    sprint_id: int, name: str = "", goal: str = "", start: str = "", end: str = ""
+) -> dict[str, Any]:
+    from .jira import JiraClient
+
+    if not (name or goal or start or end):
+        raise OpError("nothing_to_update", "Give at least one of name, goal, start or end.")
+    return JiraClient().update_sprint(
+        sprint_id, name=name or None, goal=goal or None, start=start or None, end=end or None
+    ).as_dict()
+
+
+def jira_assign(issue_keys: list[str], assignee: str) -> dict[str, Any]:
+    from .jira import JiraClient
+
+    jira = JiraClient()
+    if assignee.strip().lower() in ("", "unassigned", "none"):
+        member_name, user = "Unassigned", None
+    else:
+        member = jira.config.member_by(assignee)
+        if member is None:
+            known = ", ".join(m.name for m in jira.config.members) or "(roster is empty)"
+            raise OpError(
+                "unknown_member",
+                f"{assignee!r} is not in [[team.members]] in config.toml. Known: {known}. "
+                "Add them there (INSTALL.md, team roster) to assign them work.",
+            )
+        if not member.jira:
+            raise OpError(
+                "no_jira_id",
+                f"{member.name} has no `jira` value in [[team.members]] in config.toml: "
+                "the Jira username on Data Center, the accountId on Cloud (INSTALL.md, team roster).",
+            )
+        member_name, user = member.name, member.jira
+    for key in issue_keys:
+        jira.assign(key, user)
+    return {"assignee": member_name, "issues": issue_keys}
+
+
 # ------------------------------------------------------------------- gitlab
 
 
@@ -345,7 +384,7 @@ def vault_sync_sprint(sprint_id: int = 0) -> dict[str, Any]:
     if not sprint:
         raise OpError("not_found", f"No sprint {sprint_id or '(active)'}.")
     issues = jira.sprint_issues(sprint.id)
-    title = builder.sync_sprint(sprint, issues, jira.workload(sprint.id))
+    title = builder.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint))
     return {"note": title, "sprint": sprint.as_dict(), "issues": len(issues)}
 
 

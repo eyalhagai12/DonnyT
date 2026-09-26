@@ -74,6 +74,26 @@ class JiraClient:
         self.api = "/rest/api/3" if self.cloud else "/rest/api/2"
         self.http = JSONClient(self.site, headers=self.config.atlassian_headers("jira"))
         self.points_field = self.config.story_points_field
+        self._epic_field: str | None = None
+
+    @property
+    def epic_field(self) -> str:
+        """Data Center's Epic Link field id, looked up by name on first use.
+
+        Cloud links an issue to its epic through ``parent``, which every query
+        already reads, so this is empty there.
+        """
+        if self._epic_field is None:
+            self._epic_field = ""
+            if not self.cloud:
+                self._epic_field = self.config.epic_link_field or next(
+                    (f["id"] for f in self.fields() if f["name"] == "Epic Link"), ""
+                )
+        return self._epic_field
+
+    def _issue_fields(self) -> list[str]:
+        base = ["summary", "status", "issuetype", "assignee", "priority", "labels", "parent", self.points_field]
+        return base + [self.epic_field] if self.epic_field else base
 
     # -- issues ------------------------------------------------------------
     def search(self, jql: str, limit: int = 100) -> list[Issue]:
@@ -82,16 +102,7 @@ class JiraClient:
         Cloud retired offset paging in favour of ``/search/jql`` with page
         tokens; Data Center only has the offset form. Same results either way.
         """
-        fields = [
-            "summary",
-            "status",
-            "issuetype",
-            "assignee",
-            "priority",
-            "labels",
-            "parent",
-            self.points_field,
-        ]
+        fields = self._issue_fields()
         issues: list[Issue] = []
         next_token: str | None = None
 
@@ -182,7 +193,7 @@ class JiraClient:
         board = board_id or self.config.jira_board_id
         data = self.http.get(
             f"/rest/agile/1.0/board/{board}/backlog",
-            params={"maxResults": limit, "fields": "summary,status,issuetype,assignee,priority,labels,parent," + self.points_field},
+            params={"maxResults": limit, "fields": ",".join(self._issue_fields())},
         )
         return [self._to_issue(raw) for raw in data.get("issues", [])]
 
@@ -215,6 +226,39 @@ class JiraClient:
             moved += len(chunk)
         return {"sprint_id": sprint_id, "moved": moved, "issues": issue_keys}
 
+    def update_sprint(
+        self,
+        sprint_id: int,
+        name: str | None = None,
+        goal: str | None = None,
+        start: str | None = None,
+        end: str | None = None,
+    ) -> Sprint:
+        """Change a sprint's name, goal or dates. Fields left as None are kept.
+
+        The agile API's POST is a partial update (its PUT replaces the whole
+        sprint), and it is the same on Cloud and Data Center.
+        """
+        payload: dict[str, Any] = {}
+        if name is not None:
+            payload["name"] = name
+        if goal is not None:
+            payload["goal"] = goal
+        if start is not None:
+            payload["startDate"] = start
+        if end is not None:
+            payload["endDate"] = end
+        return self._to_sprint(self.http.post(f"/rest/agile/1.0/sprint/{sprint_id}", json_body=payload))
+
+    def assign(self, key: str, user: str | None) -> None:
+        """Assign an issue, or unassign it when ``user`` is None.
+
+        ``user`` is the roster's ``jira`` value: an accountId on Cloud, a
+        username on Data Center, which has no accountIds.
+        """
+        body = {"accountId": user} if self.cloud else {"name": user}
+        self.http.put(f"{self.api}/issue/{key}/assignee", json_body=body)
+
     # -- analysis ----------------------------------------------------------
     def velocity(self, board_id: int | None = None, sprints_back: int = 5) -> dict[str, Any]:
         """Completed points per closed sprint, plus the mean.
@@ -227,8 +271,15 @@ class JiraClient:
 
         history = []
         for sprint in reversed(recent):
-            issues = self.sprint_issues(sprint.id)
-            done = [i for i in issues if i.status in self.config.done_statuses]
+            members = self._sprint_members(sprint.id)
+            issues = [issue for issue, _ in members]
+            # Jira keeps every sprint an issue sat in, and status is today's.
+            # An issue that spilled over is done now but was finished in its
+            # last sprint only -- count it there, not in every sprint it passed.
+            done = [
+                issue for issue, last in members
+                if last == sprint.id and issue.status in self.config.done_statuses
+            ]
             completed = sum(i.points or 0 for i in done)
             committed = sum(i.points or 0 for i in issues)
             history.append(
@@ -246,6 +297,18 @@ class JiraClient:
         completed_values = [h["completed_points"] for h in history]
         average = round(sum(completed_values) / len(completed_values), 1) if completed_values else 0.0
         return {"history": history, "average_completed_points": average, "sprints_sampled": len(history)}
+
+    def done_in(self, sprint: Sprint) -> list[Issue]:
+        """Issues finished in ``sprint``.
+
+        For a closed sprint that means done *and* not carried into a later
+        sprint, as in ``velocity``. An open sprint still holds its issues, so
+        today's status is the answer there.
+        """
+        done = self.config.done_statuses
+        if sprint.state != "closed":
+            return [i for i in self.sprint_issues(sprint.id) if i.status in done]
+        return [i for i, last in self._sprint_members(sprint.id) if last == sprint.id and i.status in done]
 
     def workload(self, sprint_id: int) -> dict[str, Any]:
         """Points per assignee in a sprint, measured against configured capacity."""
@@ -271,10 +334,41 @@ class JiraClient:
         }
 
     # -- internals ---------------------------------------------------------
+    def _sprint_members(self, sprint_id: int) -> list[tuple[Issue, int | None]]:
+        """Issues ever in a sprint, each with the id of the last sprint it sat in.
+
+        The agile API returns ``closedSprints`` and the current ``sprint`` in the
+        same shape on Cloud and Data Center. The last sprint is None while the
+        issue is still in an active or future sprint -- it was not finished in
+        any closed one.
+        """
+        fields = ",".join(self._issue_fields() + ["sprint", "closedSprints"])
+        members: list[tuple[Issue, int | None]] = []
+        while True:
+            data = self.http.get(
+                f"/rest/agile/1.0/sprint/{sprint_id}/issue",
+                params={"fields": fields, "maxResults": 50, "startAt": len(members)},
+            )
+            batch = data.get("issues", [])
+            for raw in batch:
+                f = raw.get("fields", {}) or {}
+                closed = f.get("closedSprints") or []
+                if f.get("sprint"):
+                    last = None
+                elif closed:
+                    last = int(max(closed, key=lambda s: (s.get("endDate") or "", s.get("id", 0)))["id"])
+                else:
+                    last = sprint_id
+                members.append((self._to_issue(raw), last))
+            if not batch or len(members) >= int(data.get("total", 0)):
+                return members
+
     def _to_issue(self, raw: dict[str, Any]) -> Issue:
         fields = raw.get("fields", {}) or {}
         assignee = fields.get("assignee") or {}
         parent = fields.get("parent") or {}
+        # Data Center: an epic's children carry its key in Epic Link, not parent.
+        epic = fields.get(self.epic_field) if self.epic_field else None
         points = fields.get(self.points_field)
         return Issue(
             key=raw.get("key", ""),
@@ -285,7 +379,7 @@ class JiraClient:
             points=float(points) if isinstance(points, (int, float)) else None,
             priority=((fields.get("priority") or {}).get("name", "")),
             labels=list(fields.get("labels") or []),
-            parent=parent.get("key", ""),
+            parent=parent.get("key", "") or (epic if isinstance(epic, str) else ""),
             url=f"{self.site}/browse/{raw.get('key', '')}",
         )
 

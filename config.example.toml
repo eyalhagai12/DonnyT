@@ -77,6 +77,11 @@ board_id = 0
 # it exists and suggests the right one if not.
 story_points_field = "customfield_10016"
 
+# Data Center only: the Epic Link field, which ties an issue to its epic (Cloud
+# uses the built-in parent). Empty = look up the field named "Epic Link". Set it
+# if your site renamed or translated that field.
+epic_link_field = ""
+
 # Statuses that count as finished when measuring velocity. Match your
 # workflow's exact status names, including capitalisation.
 done_statuses = ["Done", "Closed", "Resolved"]

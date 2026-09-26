@@ -91,6 +91,10 @@ python -m donnyt.cli doctor
   same on Cloud and Data Center.
 - The board sprint list pages at 50 in id order; `JiraClient.sprints` pages
   through all of them, or velocity silently reads the oldest sprints.
+- An issue keeps every sprint it sat in, and its status is today's. Velocity
+  counts it as completed only in its last sprint (`JiraClient._sprint_members`,
+  from the agile API's `closedSprints`), or spill-over inflates every sprint
+  it passed through. Sprint notes get the same answer from `JiraClient.done_in`.
 - Cloud JQL search uses `/search/jql` with page tokens; Data Center only has
   `/search` with `startAt`. `JiraClient.search` does both.
 - Data Center Confluence often lives under a context path (`/confluence`), and

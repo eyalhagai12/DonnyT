@@ -42,6 +42,8 @@ TOOLS: dict[str, str] = {
     "jira_workload": "workload [--sprint-id N]",
     "jira_create_sprint": "create-sprint NAME [--start D] [--end D] [--goal TEXT]",
     "jira_add_to_sprint": "add-to-sprint SPRINT_ID KEY [KEY ...]",
+    "jira_update_sprint": "update-sprint SPRINT_ID [--name N] [--goal TEXT] [--start D] [--end D]",
+    "jira_assign": "assign ASSIGNEE KEY [KEY ...]",
     "gitlab_branch_summary": "branch REPO_PATH [--target BRANCH]",
     "gitlab_compare": "compare SOURCE [--target BRANCH] [--project P]",
     "gitlab_list_mrs": "mrs [--state S] [--author USER] [--limit N]",
@@ -157,6 +159,17 @@ def build_parser() -> argparse.ArgumentParser:
     add_to_sprint = sub.add_parser("add-to-sprint", help="Move issues into a sprint. Team-visible.")
     add_to_sprint.add_argument("sprint_id", type=int)
     add_to_sprint.add_argument("keys", nargs="+")
+
+    update_sprint = sub.add_parser("update-sprint", help="Change a sprint's name, goal or dates. Team-visible.")
+    update_sprint.add_argument("sprint_id", type=int)
+    update_sprint.add_argument("--name", default="")
+    update_sprint.add_argument("--goal", default="")
+    update_sprint.add_argument("--start", default="", help="YYYY-MM-DD")
+    update_sprint.add_argument("--end", default="", help="YYYY-MM-DD")
+
+    assign = sub.add_parser("assign", help="Assign issues to a team member. Team-visible.")
+    assign.add_argument("assignee", help='Roster name, Jira id or GitLab username; "unassigned" clears it.')
+    assign.add_argument("keys", nargs="+")
 
     # -- gitlab ------------------------------------------------------------
     branch = sub.add_parser("branch", help="Summarize a local branch against its target.")
@@ -326,6 +339,8 @@ _HANDLERS: dict[str, Any] = {
     "workload": lambda a: ops.jira_workload(a.sprint_id),
     "create-sprint": lambda a: ops.jira_create_sprint(a.name, a.start, a.end, a.goal),
     "add-to-sprint": lambda a: ops.jira_add_to_sprint(a.sprint_id, a.keys),
+    "update-sprint": lambda a: ops.jira_update_sprint(a.sprint_id, a.name, a.goal, a.start, a.end),
+    "assign": lambda a: ops.jira_assign(a.keys, a.assignee),
     # gitlab
     "branch": lambda a: ops.gitlab_branch_summary(a.repo_path, a.target),
     "compare": lambda a: ops.gitlab_compare(a.source, a.target, a.project),

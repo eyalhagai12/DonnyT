@@ -50,12 +50,17 @@ class GraphBuilder:
         self.vault = Vault(config=self.config)
 
     # -- sprints -----------------------------------------------------------
-    def sync_sprint(self, sprint: Sprint, issues: list[Issue], workload: dict[str, Any]) -> str:
-        """Write the note for one sprint and touch every person it involved."""
+    def sync_sprint(
+        self, sprint: Sprint, issues: list[Issue], workload: dict[str, Any], done: list[Issue]
+    ) -> str:
+        """Write the note for one sprint and touch every person it involved.
+
+        ``done`` comes from ``JiraClient.done_in``: today's status alone would
+        count spill-over as finished in every sprint it passed through.
+        """
         title = sprint.name
         people = sorted({i.assignee for i in issues if i.assignee})
 
-        done = [i for i in issues if i.status in self.config.done_statuses]
         committed = round(sum(i.points or 0 for i in issues), 1)
         completed = round(sum(i.points or 0 for i in done), 1)
 
@@ -247,7 +252,9 @@ class GraphBuilder:
 
         for sprint in candidates:
             issues = jira.sprint_issues(sprint.id)
-            written["sprints"].append(self.sync_sprint(sprint, issues, jira.workload(sprint.id)))
+            written["sprints"].append(
+                self.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint))
+            )
 
         if include_mrs and self.config.gitlab_default_project:
             gitlab = GitLabClient(self.config)
