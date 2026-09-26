@@ -32,3 +32,8 @@ vault/.trash/
 # --- local devstack: credentials, tokens, throwaway vault (never commit) ---
 test/devstack/donnyt/
 test/devstack/.env
+
+# --- ui mockups: screenshots of internal apps, generated mocks, browser login ---
+ui-style/
+mocks/
+.donnyt/

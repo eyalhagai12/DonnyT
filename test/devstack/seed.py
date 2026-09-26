@@ -388,6 +388,72 @@ TEMPLATE = """\
 <ac:structured-macro ac:name="warning"><ac:rich-text-body><p>Anything touching auth, payments or data deletion needs a second reviewer.</p></ac:rich-text-body></ac:structured-macro>
 """
 
+PRD_TITLE = "PRD Template"
+
+# A product requirements template that comes *before* the tickets: it starts
+# from the problem and the proposed solution, spends most of its length on the
+# user experience, and ends with requirements product can cut tickets from.
+# Macro shapes for the converter: callouts, placeholders, status labels in
+# tables, a task list and an expand.
+PRD = """\
+<ac:structured-macro ac:name="info"><ac:rich-text-body><p>Write this before any tickets exist. Start from the problem, describe what the solution looks like to the user, and end with requirements that product and engineering can turn into tickets. Keep every heading; if a section does not apply, write N/A and say why.</p></ac:rich-text-body></ac:structured-macro>
+<table><tbody>
+<tr><th>Status</th><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Grey</ac:parameter><ac:parameter ac:name="title">Draft</ac:parameter></ac:structured-macro></td></tr>
+<tr><th>Owner</th><td><ac:placeholder>Product owner and team lead.</ac:placeholder></td></tr>
+<tr><th>Target release</th><td><ac:placeholder>Quarter, milestone or date.</ac:placeholder></td></tr>
+<tr><th>Tickets</th><td><ac:placeholder>Filled in once the PRD is approved and tickets are created.</ac:placeholder></td></tr>
+</tbody></table>
+<h2>Problem</h2>
+<p><ac:placeholder>Who has the problem, what it costs them today, and how we know. Evidence over opinion.</ac:placeholder></p>
+<h2>Goals</h2>
+<table><tbody>
+<tr><th>Goal</th><th>Metric</th><th>Target</th></tr>
+<tr><td><ac:placeholder>The outcome we want.</ac:placeholder></td><td><ac:placeholder>How we measure it.</ac:placeholder></td><td><ac:placeholder>The number that means success.</ac:placeholder></td></tr>
+</tbody></table>
+<h2>Non-goals</h2>
+<ul><li><ac:placeholder>What this deliberately does not do, so nobody assumes it will.</ac:placeholder></li></ul>
+<h2>Users</h2>
+<ul><li><ac:placeholder>Each kind of user, what they are trying to get done, and how often.</ac:placeholder></li></ul>
+<h2>Proposed solution</h2>
+<p><ac:placeholder>What we will build, in a paragraph a new team member could follow. The shape of the solution, not the implementation.</ac:placeholder></p>
+<h2>User experience</h2>
+<h3>User flows</h3>
+<ol><li><ac:placeholder>Step by step, from where the user starts to the outcome they wanted. One list per flow.</ac:placeholder></li></ol>
+<h3>Screens</h3>
+<table><tbody>
+<tr><th>Screen</th><th>Purpose</th><th>Shows</th><th>User can</th></tr>
+<tr><td><ac:placeholder>Name.</ac:placeholder></td><td><ac:placeholder>Why the user is here.</ac:placeholder></td><td><ac:placeholder>The information on it.</ac:placeholder></td><td><ac:placeholder>The actions available.</ac:placeholder></td></tr>
+</tbody></table>
+<h3>States and edge cases</h3>
+<ul><li><ac:placeholder>Empty, loading, error, no permission, very large data, first-time use. What the user sees in each.</ac:placeholder></li></ul>
+<h3>Mockups</h3>
+<p><ac:placeholder>Mockups or wireframes for each screen above, or a link to the design file.</ac:placeholder></p>
+<h2>Requirements</h2>
+<table><tbody>
+<tr><th>ID</th><th>Requirement</th><th>Priority</th><th>Acceptance criteria</th></tr>
+<tr><td>R1</td><td><ac:placeholder>What the product must do, from the user's side. Each one should be small enough to become a ticket.</ac:placeholder></td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Red</ac:parameter><ac:parameter ac:name="title">Must</ac:parameter></ac:structured-macro></td><td><ac:placeholder>Testable: given / when / then.</ac:placeholder></td></tr>
+<tr><td>R2</td><td><ac:placeholder>What the product should do.</ac:placeholder></td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">Should</ac:parameter></ac:structured-macro></td><td><ac:placeholder>Testable: given / when / then.</ac:placeholder></td></tr>
+</tbody></table>
+<h2>Non-functional requirements</h2>
+<ul><li><ac:placeholder>Performance, availability, security, privacy, accessibility. Numbers, not adjectives.</ac:placeholder></li></ul>
+<h2>Dependencies and risks</h2>
+<table><tbody>
+<tr><th>Item</th><th>Type</th><th>Mitigation</th></tr>
+<tr><td><ac:placeholder>Another team, a service, a vendor, a data migration.</ac:placeholder></td><td><ac:placeholder>Dependency or risk.</ac:placeholder></td><td><ac:placeholder>What we do about it.</ac:placeholder></td></tr>
+</tbody></table>
+<h2>Open questions</h2>
+<ul><li><ac:placeholder>Anything undecided, with who owns the answer.</ac:placeholder></li></ul>
+<h2>Sign-off</h2>
+<ac:task-list>
+<ac:task><ac:task-id>1</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Product</ac:task-body></ac:task>
+<ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Engineering</ac:task-body></ac:task>
+<ac:task><ac:task-id>3</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Design</ac:task-body></ac:task>
+<ac:task><ac:task-id>4</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>QA</ac:task-body></ac:task>
+</ac:task-list>
+<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">Appendix</ac:parameter><ac:rich-text-body><p>Research notes, customer quotes, links to prior decisions.</p></ac:rich-text-body></ac:structured-macro>
+<ac:structured-macro ac:name="warning"><ac:rich-text-body><p>Anything that touches personal data, payments or authentication needs a security review before sign-off.</p></ac:rich-text-body></ac:structured-macro>
+"""
+
 
 def seed_confluence() -> dict[str, object]:
     token = env("CONFLUENCE_PAT")
@@ -417,8 +483,11 @@ def seed_confluence() -> dict[str, object]:
 
     template_id = upsert(TEMPLATE_TITLE, TEMPLATE)
     plans_id = upsert("Sprint Plans", "<p>Sprint plans published by DonnyT live under this page.</p>")
-    print(f"  space {SPACE}: template page {template_id}, sprint plans page {plans_id}")
-    return {"template": template_id, "plans": plans_id}
+    prd_id = upsert(PRD_TITLE, PRD)
+    prds_id = upsert("Product Requirements", "<p>PRDs published by DonnyT live under this page.</p>")
+    print(f"  space {SPACE}: template page {template_id}, sprint plans page {plans_id}, "
+          f"PRD template {prd_id}, PRDs page {prds_id}")
+    return {"template": template_id, "plans": plans_id, "prd_template": prd_id, "prds": prds_id}
 
 
 # ------------------------------------------------------------ donnyt config
@@ -446,12 +515,15 @@ def write_config(jira: dict[str, object] | None, confluence: dict[str, object] |
         )
     if confluence:
         setting("mr_template_page_id", f'"{confluence["template"]}"')
-        if "sprint_plan_parent_page_id" in text:
-            setting("sprint_plan_parent_page_id", f'"{confluence["plans"]}"')
-        else:
-            text = text.replace(
-                "[confluence]\n", f'[confluence]\nsprint_plan_parent_page_id = "{confluence["plans"]}"\n', 1
-            )
+        for key, value in (
+            ("sprint_plan_parent_page_id", confluence["plans"]),
+            ("prd_template_page_id", confluence["prd_template"]),
+            ("prd_parent_page_id", confluence["prds"]),
+        ):
+            if re.search(rf"(?m)^{key}\s*=", text):
+                setting(key, f'"{value}"')
+            else:
+                text = text.replace("[confluence]\n", f'[confluence]\n{key} = "{value}"\n', 1)
     CONFIG.write_text(text, encoding="utf-8")
     print(f"donnyt: updated {CONFIG.relative_to(HERE.parent.parent)}")
 

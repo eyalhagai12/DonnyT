@@ -12,12 +12,23 @@ Markdown on the way out so the model reads a template the way a person does.
 
 from __future__ import annotations
 
+import mimetypes
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 from ._html2md import markdown_to_storage, storage_to_markdown
 from ._http import JSONClient
 from .config import Config, load_config
+
+
+def attachments_title(title: str) -> str:
+    """Title of the child page holding a page's attachments."""
+    return f"{title} - Attachments"
+
+
+def _attr(text: str) -> str:
+    return text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 @dataclass
@@ -73,25 +84,34 @@ class ConfluenceClient:
     def find_page(self, title: str, space_key: str | None = None) -> Page | None:
         """Find a page by exact title, scoped to a space when one is configured."""
         space = space_key if space_key is not None else self.config.confluence_space
-        cql = 'type=page AND title="{}"'.format(title.replace('"', '\\"'))
         if space:
-            cql += f' AND space="{space}"'
-        results = self.search(cql, limit=1)
-        return self.get_page(results[0]["id"]) if results else None
+            # Exact-title content lookup, not CQL: search is backed by an index
+            # that lags page creation, so a page published seconds ago would be
+            # missed and a re-publish would fail as a duplicate.
+            if self.cloud:
+                params = {"title": title, "space-id": self.space_id(space), "limit": 1}
+                results = self.http.get("/api/v2/pages", params=params).get("results", [])
+            else:
+                params = {"spaceKey": space, "title": title, "type": "page", "limit": 1}
+                results = self.http.get("/rest/api/content", params=params).get("results", [])
+        else:
+            cql = 'type=page AND title="{}"'.format(title.replace('"', '\\"'))
+            results = self.search(cql, limit=1)
+        return self.get_page(str(results[0]["id"])) if results else None
 
-    def get_template(self) -> Page:
-        """The configured MR template page -- by id when set, otherwise by title."""
-        page_id = self.config.mr_template_page_id
+    def get_template(self, kind: str = "mr") -> Page:
+        """A configured template page (``mr`` or ``prd``) -- by id when set, otherwise by title."""
+        page_id = getattr(self.config, f"{kind}_template_page_id")
         if page_id:
             return self.get_page(page_id)
 
-        title = self.config.mr_template_title
+        title = getattr(self.config, f"{kind}_template_title")
         page = self.find_page(title)
         if page is None:
             raise LookupError(
                 f"No Confluence page titled {title!r} in space "
                 f"{self.config.confluence_space or '(any)'!r}.\n"
-                "Set confluence.mr_template_page_id in config.toml to pin it by id."
+                f"Set confluence.{kind}_template_page_id in config.toml to pin it by id."
             )
         return page
 
@@ -114,8 +134,12 @@ class ConfluenceClient:
         markdown: str,
         space_id: str | None = None,
         parent_id: str | None = None,
+        attachment_page: str = "",
+        storage: str | None = None,
     ) -> Page:
-        storage = markdown_to_storage(markdown)
+        """Create a page from Markdown, or from ready storage XHTML when ``storage`` is given."""
+        if storage is None:
+            storage = markdown_to_storage(markdown, attachment_page)
         payload: dict[str, Any]
         if self.cloud:
             payload = {
@@ -138,9 +162,9 @@ class ConfluenceClient:
             payload["ancestors"] = [{"id": str(parent_id)}]
         return self._to_page(self.http.post("/rest/api/content", json_body=payload))
 
-    def update_page(self, page_id: str, title: str, markdown: str) -> Page:
+    def update_page(self, page_id: str, title: str, markdown: str, attachment_page: str = "") -> Page:
         current = self.get_page(page_id)
-        storage = markdown_to_storage(markdown)
+        storage = markdown_to_storage(markdown, attachment_page)
         version = {"number": current.version + 1}
         if self.cloud:
             payload: dict[str, Any] = {
@@ -161,6 +185,42 @@ class ConfluenceClient:
             "version": version,
         }
         return self._to_page(self.http.put(f"/rest/api/content/{page_id}", json_body=payload))
+
+    def attachments_page(self, page: Page) -> Page:
+        """The child page that holds ``page``'s files, created on first use.
+
+        Titles are unique per space, so it is named after its parent. Its body
+        is Confluence's attachments macro: a list of the files, with previews.
+        """
+        title = attachments_title(page.title)
+        existing = self.find_page(title)
+        if existing:
+            return existing
+        storage = (
+            f"<p>Files used by <ac:link><ri:page ri:content-title=\"{_attr(page.title)}\"/></ac:link>: "
+            "mockup images and their HTML sources. Edit the parent page, not this one.</p>"
+            '<ac:structured-macro ac:name="attachments"/>'
+        )
+        return self.create_page(title, "", parent_id=page.id, storage=storage)
+
+    def attach(self, page_id: str, file_path: str | Path) -> dict[str, Any]:
+        """Upload a file to a page, replacing an attachment of the same name.
+
+        The v1 attachment API is the only upload path on both flavours: Cloud's
+        v2 has no upload endpoint, and on Cloud ``self.base`` already ends in
+        ``/wiki``. Looking the name up first avoids relying on the
+        create-or-update ``PUT``, which Data Center does not have.
+        """
+        path = Path(file_path)
+        content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+        base = f"/rest/api/content/{page_id}/child/attachment"
+        existing = self.http.get(base, params={"filename": path.name}).get("results", [])
+        target = f"{base}/{existing[0]['id']}/data" if existing else base
+        self.http.upload(
+            "POST", target, path.name, path.read_bytes(), content_type,
+            headers={"X-Atlassian-Token": "no-check"},
+        )
+        return {"file": path.name, "action": "replaced" if existing else "added"}
 
     # -- internals ---------------------------------------------------------
     def _space_key(self, key: str | None = None) -> str:

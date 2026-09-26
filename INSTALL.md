@@ -63,6 +63,7 @@ Collect these before step 5; each is visible in a URL.
 | `atlassian.confluence_url` | Data Center only, when Confluence has its own host or path | `https://wiki.corp.internal` |
 | `confluence.space` | Page URL: `/spaces/`**`ENG`**`/...`, or `spaceKey=ENG` | `ENG` |
 | `confluence.mr_template_page_id` | Cloud page URL: `/pages/`**`123456789`**`/MR+Template`. Data Center: **⋯ → Page Information**, the `pageId=` in the URL | `123456789` |
+| `confluence.prd_template_page_id` | Optional, for `/prd-write`. Found the same way as the MR template | `123456790` |
 | `jira.project_key` | The prefix on any issue: **`TEAM`**`-1234` | `TEAM` |
 | `jira.board_id` | Board URL: `/boards/`**`42`** | `42` |
 | `gitlab.default_project` | The path after the host | `platform/backend/api` |
@@ -283,6 +284,7 @@ site = "https://acme.atlassian.net"     # or https://jira.corp.internal
 [confluence]
 space = "ENG"
 mr_template_page_id = "123456789"   # your MR template page
+prd_template_page_id = ""            # optional: your PRD template page, for /prd-write
 
 [jira]
 project_key = "TEAM"
@@ -380,6 +382,30 @@ green, MRs orange, decisions purple.
 
 The vault is plain Markdown. Skipping Obsidian costs you the graph view and
 nothing else.
+
+### Step 9 — UI mockups (optional)
+
+`/ui-mock` (and the Mockups section of `/prd-write`) draws screens in the style
+of your own system. It needs only a browser that is already installed: Edge
+ships with Windows; on Linux or macOS, Chrome or Chromium. No package to
+install.
+
+1. `python -m donnyt.cli doctor` should show `[ok] ui_mockups  browser ...`.
+   It uses your default browser when that is Chrome or Edge. To choose, set
+   `ui.browser` in `config.toml` to `"chrome"` or `"edge"`, or to the full
+   path of the executable.
+2. Give it the look of your system, either or both:
+   - **Screenshots:** save a few PNGs of typical pages (a list, a form, a
+     detail page) into `ui-style/screens/`. Optionally write
+     `ui-style/style.md` with exact colours, fonts and conventions; it wins
+     over what is guessed from the pixels.
+   - **The running app:** `python -m donnyt.cli ui-capture <url> <name>`.
+     If the result shows a login page, run
+     `python -m donnyt.cli ui-login <url>` once, sign in (tick *Remember me*),
+     close the window, and capture again.
+
+`ui-style/`, `mocks/` and `.donnyt/` are git-ignored: screenshots of internal
+apps can contain real data.
 
 ---
 

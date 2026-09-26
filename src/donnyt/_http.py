@@ -96,6 +96,8 @@ class JSONClient:
         *,
         params: dict[str, Any] | None = None,
         json_body: Any = None,
+        body: bytes | None = None,
+        headers: dict[str, str] | None = None,
     ) -> Any:
         url = path if path.startswith("http") else f"{self.base_url}{path}"
 
@@ -109,13 +111,13 @@ class JSONClient:
             if clean:
                 url += ("&" if "?" in url else "?") + urllib.parse.urlencode(clean, doseq=True)
 
-        data = None
-        headers = dict(self.headers)
+        data = body
+        all_headers = {**self.headers, **(headers or {})}
         if json_body is not None:
             data = json.dumps(json_body).encode("utf-8")
-            headers["Content-Type"] = "application/json"
+            all_headers["Content-Type"] = "application/json"
 
-        request = urllib.request.Request(url, data=data, headers=headers, method=method.upper())
+        request = urllib.request.Request(url, data=data, headers=all_headers, method=method.upper())
 
         try:
             with self._opener.open(request, timeout=self.timeout) as response:
@@ -145,3 +147,31 @@ class JSONClient:
 
     def put(self, path: str, **kwargs: Any) -> Any:
         return self.request("PUT", path, **kwargs)
+
+    def upload(
+        self,
+        method: str,
+        path: str,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        *,
+        field: str = "file",
+        headers: dict[str, str] | None = None,
+    ) -> Any:
+        """Send one file as multipart/form-data -- urllib has no helper for it."""
+        boundary = "donnyt-" + base64.urlsafe_b64encode(os.urandom(18)).decode().rstrip("=")
+        safe_name = filename.replace('"', "")
+        body = b"".join([
+            f"--{boundary}\r\n".encode(),
+            f'Content-Disposition: form-data; name="{field}"; filename="{safe_name}"\r\n'.encode(),
+            f"Content-Type: {content_type}\r\n\r\n".encode(),
+            content,
+            f"\r\n--{boundary}--\r\n".encode(),
+        ])
+        return self.request(
+            method,
+            path,
+            body=body,
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}", **(headers or {})},
+        )

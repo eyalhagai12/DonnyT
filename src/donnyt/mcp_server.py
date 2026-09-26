@@ -70,6 +70,24 @@ def confluence_get_mr_template(raw: bool = False) -> dict[str, Any]:
 
 
 @mcp.tool()
+def confluence_get_prd_template(raw: bool = False) -> dict[str, Any]:
+    """Fetch the team's product requirements document (PRD) template from Confluence as Markdown.
+
+    Returns the template body, its section headings, and `parent_id`: the page
+    a finished PRD should be published under (pass it to `confluence_publish`;
+    empty means the space root). Use this before drafting any PRD so it
+    follows the team's agreed structure rather than an invented one.
+
+    Fails with `no_prd_template` when the template page is not configured --
+    stop and report that rather than inventing a structure.
+
+    Set `raw=True` for the untouched storage-format XHTML, to diagnose a
+    section that converted wrong.
+    """
+    return _guard(ops.prd_template, raw)
+
+
+@mcp.tool()
 def confluence_get_page(page_id: str, raw: bool = False) -> dict[str, Any]:
     """Read a Confluence page by id and return its content as Markdown.
 
@@ -89,13 +107,22 @@ def confluence_search(cql: str, limit: int = 25) -> Any:
 
 
 @mcp.tool()
-def confluence_publish(title: str, markdown: str, parent_id: str = "") -> Any:
-    """Create or update a Confluence page from Markdown.
+def confluence_publish(
+    title: str, markdown: str, parent_id: str = "", attachments: list[str] | None = None
+) -> Any:
+    """Create or update a Confluence page from Markdown. Team-visible: confirm first.
 
     Updates the page in place when one of that title already exists in the
     configured space, otherwise creates it under `parent_id`.
+
+    `attachments` are local file paths. They are uploaded to a child page,
+    "<title> - Attachments", created on first use, so the page itself holds
+    only the document; an upload replaces a file of the same name. Embed an
+    image in the Markdown as `![Alt text](attachment:file-name.png)` -- it is
+    pointed at the attachments page automatically. Returns the page, whether
+    it was created or updated, the attachments page and each upload.
     """
-    return _guard(ops.confluence_publish, title, markdown, parent_id)
+    return _guard(ops.confluence_publish, title, markdown, parent_id, attachments)
 
 
 # --------------------------------------------------------------------- jira
@@ -309,6 +336,59 @@ def vault_sync_mr(iid: int, project: str = "", summary: str = "") -> Any:
     The Jira key is read from the branch name or MR title, e.g. `TEAM-1234`.
     """
     return _guard(ops.vault_sync_mr, iid, project, summary)
+
+
+# ----------------------------------------------------------------------- ui
+
+
+@mcp.tool()
+def ui_style() -> Any:
+    """What the toolkit knows about how the team's system looks. Call it first when making UI mockups.
+
+    Returns `screenshots` (paths and pixel sizes of reference screenshots),
+    `notes` (the hand-written style.md: colours, fonts, conventions), the
+    `browser` used for rendering (null means mockups cannot be rendered) and
+    `mocks_dir`, where mockup HTML should be written. Read every screenshot
+    path with the Read tool to actually see the style; the paths alone say
+    nothing about it.
+    """
+    return _guard(ops.ui_style)
+
+
+@mcp.tool()
+def ui_login(url: str) -> Any:
+    """Open a visible browser window on the internal app so the user can sign in once.
+
+    Uses DonnyT's own browser profile, so `ui_capture` can then take
+    screenshots while logged in. Tell the user to sign in and then CLOSE the
+    window: the profile is locked while it is open. Only needed when the app
+    requires a login; try `ui_capture` first.
+    """
+    return _guard(ops.ui_login, url)
+
+
+@mcp.tool()
+def ui_capture(url: str, name: str, width: int = 0, height: int = 0) -> Any:
+    """Screenshot a page of the running system into the style folder as a reference.
+
+    Saves `screens/<name>.png` in the style folder and returns its path and
+    size; Read it to check it shows the page and not a login form (if it does,
+    use `ui_login` first). Captures one viewport (default size from config),
+    not the full scrolling page.
+    """
+    return _guard(ops.ui_capture, url, name, width, height)
+
+
+@mcp.tool()
+def ui_render_mock(html_path: str, width: int = 0, height: int = 0) -> Any:
+    """Render a self-contained HTML mockup to a PNG next to it, and return the PNG path.
+
+    Read the PNG to check the result against the reference screenshots and
+    fix the HTML until it matches. The render has no network access: inline
+    all CSS, use system fonts, and reference no external URL. Increase
+    `height` for screens taller than the default viewport.
+    """
+    return _guard(ops.ui_render_mock, html_path, width, height)
 
 
 # --------------------------------------------------------------------- meta

@@ -119,6 +119,7 @@ def run_checks() -> dict[str, Any]:
     results.append(_probe_jira(config))
     results.append(_probe_gitlab(config))
     results.append(_probe_vault(config))
+    results.append(_probe_ui(config))
 
     return _summarize(results)
 
@@ -160,6 +161,12 @@ def _probe_confluence(config: Any) -> dict[str, Any]:
                 "Set confluence.mr_template_page_id in config.toml to the numeric page id "
                 f"{'' if template_id else 'of your MR template page'} (INSTALL.md step 5).",
             )
+        # The PRD template is optional: report it, never fail on it.
+        try:
+            prd = client.get_template("prd")
+            detail += f"; PRD template '{prd.title}' (id {prd.id})"
+        except Exception:
+            detail += "; no PRD template (optional: confluence.prd_template_page_id)"
         return _check("confluence", OK, detail)
     except ConfigError as exc:
         return _check("confluence", FAIL, str(exc))
@@ -278,6 +285,23 @@ def _probe_vault(config: Any) -> dict[str, Any]:
         return _check("vault", OK, f"{stats['total_notes']} notes at {stats['path']}")
     except Exception as exc:
         return _check("vault", FAIL, str(exc), "Check vault.path in config.toml.")
+
+
+def _probe_ui(config: Any) -> dict[str, Any]:
+    """UI mockups are optional: report what is there, never fail."""
+    from .ui import style_profile
+
+    profile = style_profile(config)
+    if not profile["browser"]:
+        return _check(
+            "ui_mockups", SKIP, "no Edge/Chrome found; /ui-mock cannot render",
+            "Install Edge or Chrome, or set ui.browser in config.toml (INSTALL.md, 'UI mockups').",
+        )
+    shots = len(profile["screenshots"])
+    detail = f"browser {profile['browser']}; {shots} reference screenshot{'s' * (shots != 1)}"
+    if profile["notes"]:
+        detail += " + style.md"
+    return _check("ui_mockups", OK, detail)
 
 
 def _safe(get: Any) -> str:

@@ -29,9 +29,10 @@ from .config import ConfigError
 # command is obvious; `donnyt tools` prints it.
 TOOLS: dict[str, str] = {
     "confluence_get_mr_template": "template [--raw]",
+    "confluence_get_prd_template": "prd-template [--raw]",
     "confluence_get_page": "page PAGE_ID [--raw]",
     "confluence_search": "search CQL [--limit N]",
-    "confluence_publish": "publish TITLE --file PATH [--parent-id ID]",
+    "confluence_publish": "publish TITLE --file PATH [--parent-id ID] [--attach PATH ...]",
     "jira_search": "jql QUERY [--limit N]",
     "jira_get_issue": "issue KEY",
     "jira_sprints": "sprints [--state active|future|closed]",
@@ -55,6 +56,10 @@ TOOLS: dict[str, str] = {
     "vault_sync": "sync [--sprints-back N] [--no-mrs]",
     "vault_sync_sprint": "sync-sprint [--sprint-id N]",
     "vault_sync_mr": "sync-mr IID [--project P] [--summary TEXT]",
+    "ui_style": "ui-style",
+    "ui_login": "ui-login URL",
+    "ui_capture": "ui-capture URL NAME [--width W] [--height H]",
+    "ui_render_mock": "ui-render HTML_PATH [--width W] [--height H]",
     "donnyt_doctor": "doctor",
 }
 
@@ -90,6 +95,13 @@ def build_parser() -> argparse.ArgumentParser:
         "Use this to diagnose a section that converted wrong or went missing.",
     )
 
+    prd_template = sub.add_parser("prd-template", help="Print the Confluence PRD template as Markdown.")
+    prd_template.add_argument(
+        "--raw",
+        action="store_true",
+        help="Print the raw Confluence storage-format XHTML instead of the converted Markdown.",
+    )
+
     page = sub.add_parser("page", help="Print a Confluence page as Markdown.")
     page.add_argument("page_id")
     page.add_argument(
@@ -108,6 +120,10 @@ def build_parser() -> argparse.ArgumentParser:
     publish.add_argument("title")
     publish.add_argument("--file", required=True, help="Markdown file, or - for stdin.")
     publish.add_argument("--parent-id", default="")
+    publish.add_argument(
+        "--attach", action="append", default=None, metavar="PATH",
+        help="Upload a file to the page after publishing. Repeat for several; embed images with ![alt](attachment:NAME).",
+    )
 
     # -- jira --------------------------------------------------------------
     jql = sub.add_parser("jql", help="Run a Jira JQL query.")
@@ -172,6 +188,23 @@ def build_parser() -> argparse.ArgumentParser:
     update_mr.add_argument("--file", default="", help="New description file, or - for stdin.")
     update_mr.add_argument("--project", default="")
     update_mr.add_argument("--label", action="append", default=None)
+
+    # -- ui mockups --------------------------------------------------------
+    sub.add_parser("ui-style", help="Show the style folder: notes, reference screenshots, browser.")
+
+    ui_login = sub.add_parser("ui-login", help="Open a visible browser to sign in to the app once.")
+    ui_login.add_argument("url")
+
+    ui_capture = sub.add_parser("ui-capture", help="Screenshot a page of the app as a style reference.")
+    ui_capture.add_argument("url")
+    ui_capture.add_argument("name", help="File name for the screenshot, without .png.")
+    ui_capture.add_argument("--width", type=int, default=0)
+    ui_capture.add_argument("--height", type=int, default=0)
+
+    ui_render = sub.add_parser("ui-render", help="Render an HTML mockup to a PNG beside it.")
+    ui_render.add_argument("html_path")
+    ui_render.add_argument("--width", type=int, default=0)
+    ui_render.add_argument("--height", type=int, default=0)
 
     # -- vault -------------------------------------------------------------
     sync = sub.add_parser("sync", help="Pull Jira and GitLab into the Obsidian vault.")
@@ -259,10 +292,13 @@ def _dispatch(args: argparse.Namespace) -> int:
         return 0
 
     # Template and page print as text: they are read, not parsed.
-    if command == "template":
-        result = ops.mr_template(raw=args.raw)
+    if command in ("template", "prd-template"):
+        result = (ops.mr_template if command == "template" else ops.prd_template)(raw=args.raw)
         page = result["page"]
-        print(f"<!-- Source: {page['title']}  ({page['url']}) -->\n")
+        print(f"<!-- Source: {page['title']}  ({page['url']}) -->")
+        if result.get("parent_id"):
+            print(f"<!-- Publish under parent page {result['parent_id']} -->")
+        print()
         print(result["storage"] if args.raw else result["markdown"])
         return 0
 
@@ -279,7 +315,7 @@ def _dispatch(args: argparse.Namespace) -> int:
 _HANDLERS: dict[str, Any] = {
     # confluence
     "search": lambda a: ops.confluence_search(a.cql, a.limit),
-    "publish": lambda a: ops.confluence_publish(a.title, _read_text(a.file), a.parent_id),
+    "publish": lambda a: ops.confluence_publish(a.title, _read_text(a.file), a.parent_id, a.attach),
     # jira
     "jql": lambda a: ops.jira_search(a.query, a.limit),
     "issue": lambda a: ops.jira_issue(a.key),
@@ -312,6 +348,11 @@ _HANDLERS: dict[str, Any] = {
     "record-decision": lambda a: ops.vault_record_decision(
         a.title, a.context, a.decision, a.consequences, a.person, a.related
     ),
+    # ui
+    "ui-style": lambda a: ops.ui_style(),
+    "ui-login": lambda a: ops.ui_login(a.url),
+    "ui-capture": lambda a: ops.ui_capture(a.url, a.name, a.width, a.height),
+    "ui-render": lambda a: ops.ui_render_mock(a.html_path, a.width, a.height),
 }
 
 

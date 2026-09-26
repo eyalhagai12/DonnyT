@@ -54,6 +54,14 @@ mr_template_title = "Merge Request Template"
 # Optional. Page to file published sprint plans under. Empty = space root.
 sprint_plan_parent_page_id = ""
 
+# Optional. The product requirements (PRD) template, used by the prd-write
+# skill. Same rules as the MR template: prefer the id, the title is a fallback.
+prd_template_page_id = ""
+prd_template_title = "PRD Template"
+
+# Optional. Page to file published PRDs under. Empty = space root.
+prd_parent_page_id = ""
+
 
 [jira]
 # Project key: the prefix on every issue, e.g. "TEAM" in TEAM-1234.
@@ -89,6 +97,25 @@ default_target_branch = "main"
 [vault]
 # Obsidian vault location, relative to the repo root or an absolute path.
 path = "vault"
+
+
+[ui]
+# Optional: UI mockups for PRDs (/ui-mock). Mockups are drawn as HTML and
+# turned into PNG by a headless Edge or Chrome that is already installed.
+#
+# Which browser to use: "chrome", "edge", "chromium", or a full path to the
+# executable. Empty = your default browser if it is Chrome or Edge, otherwise
+# whichever of them is installed. Sign-in (ui-login) happens in this browser,
+# so pick the one your company's login works in.
+browser = ""
+# Reference screenshots of your system (screens/*.png) plus an optional
+# hand-written style.md. Relative to the repo root.
+style_dir = "ui-style"
+# Where generated mockups (HTML + PNG) are written.
+mocks_dir = "mocks"
+# Screenshot and mockup size in pixels.
+width = 1440
+height = 900
 
 
 # ---------------------------------------------------------------------------

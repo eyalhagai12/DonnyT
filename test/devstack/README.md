@@ -75,6 +75,7 @@ deployment = "datacenter"
 [confluence]
 space = "ENG"
 mr_template_page_id = "<page id>"
+prd_template_page_id = "<page id>"
 
 [jira]
 project_key = "TEAM"

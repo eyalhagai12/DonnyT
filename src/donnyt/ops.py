@@ -13,6 +13,7 @@ conditions a caller can act on (no active sprint, no such note) raise
 from __future__ import annotations
 
 import re
+from pathlib import Path
 from typing import Any
 
 from .config import load_config
@@ -38,10 +39,10 @@ def _active_sprint_id(jira: Any, sprint_id: int) -> int:
 # ---------------------------------------------------------------- confluence
 
 
-def mr_template(raw: bool = False) -> dict[str, Any]:
+def _template(kind: str, raw: bool) -> dict[str, Any]:
     from .confluence import ConfluenceClient
 
-    page = ConfluenceClient().get_template()
+    page = ConfluenceClient().get_template(kind)
     if raw:
         return {"page": page.summary(), "storage": page.storage}
     markdown = page.markdown
@@ -50,6 +51,20 @@ def mr_template(raw: bool = False) -> dict[str, Any]:
         "markdown": markdown,
         "sections": re.findall(r"^#{1,6}\s+(.+)$", markdown, flags=re.M),
     }
+
+
+def mr_template(raw: bool = False) -> dict[str, Any]:
+    return _template("mr", raw)
+
+
+def prd_template(raw: bool = False) -> dict[str, Any]:
+    try:
+        result = _template("prd", raw)
+    except LookupError as exc:
+        raise OpError("no_prd_template", str(exc)) from exc
+    # Where a finished PRD should be published; empty means the space root.
+    result["parent_id"] = load_config().prd_parent_page_id
+    return result
 
 
 def confluence_page(page_id: str, raw: bool = False) -> dict[str, Any]:
@@ -66,18 +81,42 @@ def confluence_search(cql: str, limit: int = 25) -> list[dict[str, Any]]:
     return ConfluenceClient().search(cql, limit)
 
 
-def confluence_publish(title: str, markdown: str, parent_id: str = "") -> dict[str, Any]:
-    from .confluence import ConfluenceClient
+def confluence_publish(
+    title: str, markdown: str, parent_id: str = "", attachments: list[str] | None = None
+) -> dict[str, Any]:
+    from .confluence import ConfluenceClient, attachments_title
 
     client = ConfluenceClient()
+    # Check every file before touching the page, so a typo can't leave a
+    # published page pointing at images that never arrive.
+    files = [_existing_file(p) for p in attachments or []]
+    # Files live on a child page, "<title> - Attachments", so the page itself
+    # stays clean; its images point there. Key off the Markdown, not `files`:
+    # a text-only re-publish still embeds the images uploaded earlier.
+    embeds = "](attachment:" in markdown
+    holder_title = attachments_title(title) if files or embeds else ""
     existing = client.find_page(title)
     parent = parent_id or client.config.sprint_plan_parent_page_id or None
     page = (
-        client.update_page(existing.id, title, markdown)
+        client.update_page(existing.id, title, markdown, attachment_page=holder_title)
         if existing
-        else client.create_page(title, markdown, parent_id=parent)
+        else client.create_page(title, markdown, parent_id=parent, attachment_page=holder_title)
     )
-    return {**page.summary(), "action": "updated" if existing else "created"}
+    result: dict[str, Any] = {**page.summary(), "action": "updated" if existing else "created"}
+    if files:
+        holder = client.attachments_page(page)
+        result["attachments_page"] = holder.summary()
+        result["attachments"] = [client.attach(holder.id, f) for f in files]
+    return result
+
+
+def _existing_file(path: str) -> Path:
+    candidate = Path(path)
+    if not candidate.is_absolute() and not candidate.is_file():
+        candidate = load_config().root / candidate
+    if not candidate.is_file():
+        raise OpError("no_such_file", f"Attachment not found: {path}")
+    return candidate
 
 
 # --------------------------------------------------------------------- jira
@@ -329,6 +368,42 @@ def vault_sync_mr(iid: int, project: str = "", summary: str = "") -> dict[str, A
 
     title = builder.sync_merge_request(mr, target, issue, summary=summary)
     return {"note": title, "mr": mr.as_dict(), "issue": key or None}
+
+
+# ----------------------------------------------------------------------- ui
+
+
+def _ui(fn: Any, *args: Any) -> dict[str, Any]:
+    from .ui import UIError
+
+    try:
+        return fn(*args)
+    except UIError as exc:
+        raise OpError("ui", str(exc)) from exc
+
+
+def ui_style() -> dict[str, Any]:
+    from . import ui
+
+    return _ui(ui.style_profile)
+
+
+def ui_login(url: str) -> dict[str, Any]:
+    from . import ui
+
+    return _ui(ui.login, url)
+
+
+def ui_capture(url: str, name: str, width: int = 0, height: int = 0) -> dict[str, Any]:
+    from . import ui
+
+    return _ui(ui.capture, url, name, width, height)
+
+
+def ui_render_mock(html_path: str, width: int = 0, height: int = 0) -> dict[str, Any]:
+    from . import ui
+
+    return _ui(ui.render, html_path, width, height)
 
 
 # --------------------------------------------------------------------- meta

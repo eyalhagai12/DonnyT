@@ -30,6 +30,7 @@ aspirational — it is the deployment target.
 | `config.py` | `.env` + `config.toml`. `repo_root()` handles the installed-vs-source split. Cloud vs Data Center, URLs and auth headers are resolved here. |
 | `confluence.py` `jira.py` `gitlab.py` | Thin REST clients returning dataclasses. Branch on `self.cloud` where Cloud and Data Center APIs differ. |
 | `vault.py` | Obsidian notes: frontmatter, links, managed blocks. |
+| `ui.py` | Mockups: screenshots of the running app and HTML → PNG, via the installed Edge/Chrome run headless. |
 | `graph.py` | Domain layer — turns API facts into linked notes. |
 | `ops.py` | Every operation, once. Both front ends call it; expected failures raise `OpError(code, msg)`. |
 | `mcp_server.py` | Tool definitions over `ops`. One-line bodies; logic belongs in `ops` or below. |
@@ -97,5 +98,18 @@ python -m donnyt.cli doctor
 - `jira_add_to_sprint` batches at 50 — Jira's hard cap per call.
 - The `mcp` SDK renamed `FastMCP` to `MCPServer` in 2.0. `mcp_server.py`
   imports either.
+- `ui.py` drives the browser's own command line (`--headless=new --screenshot`),
+  not an automation library: screenshots are one viewport, not the full page.
+  Renders block all network access, so a mock that needs a CDN or web font
+  fails here exactly as it would on the isolated host.
+- `ui_login` and `ui_capture` share `.donnyt/browser-profile`; Chromium locks a
+  profile to one process, so capture fails while the login window is open.
+- `confluence_publish` never attaches files to the page itself: they go on a
+  child page `<title> - Attachments` (titles are unique per space), and
+  `markdown_to_storage(..., attachment_page=)` points each
+  `![](attachment:x.png)` there with a nested `<ri:page>`.
+- Confluence attachments use the v1 API on both flavours (Cloud v2 cannot
+  upload). `attach` looks the name up and posts to `/{id}/data` to replace;
+  Data Center has no create-or-update `PUT`.
 - Confluence has no Markdown body format. `markdown_to_storage` covers the
   subset this toolkit emits; extend it rather than shipping raw HTML.

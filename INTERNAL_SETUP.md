@@ -299,7 +299,7 @@ information, and didn't invent anything (no fabricated ticket numbers,
 no fabricated reviewer names).
 
 Once that reads correctly, the setup is done. Everyday use from here is just
-`/mr-write`, `/sprint-plan`, and `/vault-sync` — see `README.md`.
+`/mr-write`, `/prd-write`, `/sprint-plan`, and `/vault-sync` — see `README.md`.
 
 ---
 

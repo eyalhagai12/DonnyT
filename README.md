@@ -44,6 +44,8 @@ Three skills, invoked in Claude Code:
 | Skill | What it does |
 | --- | --- |
 | `/mr-write` | Fetches the Confluence MR template, reads the actual diff, fills every section, opens the MR as a draft, records it in the vault. |
+| `/prd-write` | Turns a problem statement and a proposed solution into a PRD from the Confluence template: user flows, screens, edge cases and ticket-sized requirements. Asks about gaps instead of inventing them, publishes a draft. Runs before tickets exist; it never creates them. |
+| `/ui-mock` | Mockups in the style of your own system: learns the look from screenshots or by capturing the running app, draws each screen as HTML, renders it to PNG with the installed Edge/Chrome. `/prd-write` uses it for the Mockups section. |
 | `/sprint-plan` | Velocity, capacity, spillover, backlog selection, per-person load. Presents the plan for review before touching Jira. |
 | `/vault-sync` | Keeps the graph current; answers questions about team history; preps 1:1s. |
 
@@ -76,11 +78,12 @@ src/donnyt/
   vault.py        Obsidian notes, frontmatter, links, managed blocks
   graph.py        turns Jira/GitLab facts into linked notes
   ops.py          every operation, once -- both front ends call it
-  mcp_server.py   28 MCP tools over ops.py
-  cli.py          the same 28, from a terminal (`donnyt tools` maps them)
+  ui.py           mockups: capture the running app, render HTML to PNG
+  mcp_server.py   33 MCP tools over ops.py
+  cli.py          the same 33, from a terminal (`donnyt tools` maps them)
   doctor.py       preflight checks
 
-.claude/skills/   mr-write, sprint-plan, vault-sync
+.claude/skills/   mr-write, prd-write, ui-mock, sprint-plan, vault-sync
 vault/            the knowledge graph (plain Markdown)
 vendor/wheels/    offline install bundle
 ```

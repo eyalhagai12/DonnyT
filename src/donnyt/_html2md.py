@@ -97,8 +97,9 @@ def _preprocess_confluence(markup: str) -> str:
         flags=re.S,
     )
     markup = re.sub(
-        r'<ac:image\b[^>]*>\s*<ri:attachment\b[^>]*ri:filename="([^"]+)"[^>]*/?>.*?</ac:image>',
-        r"<p>[image: \1]</p>",
+        r'<ac:image\b(?:[^>]*?\bac:alt="([^"]*)")?[^>]*>\s*'
+        r'<ri:attachment\b[^>]*ri:filename="([^"]+)"[^>]*/?>.*?</ac:image>',
+        lambda m: f"<p>![{m.group(1) or ''}](attachment:{m.group(2)})</p>",
         markup,
         flags=re.S,
     )
@@ -294,16 +295,62 @@ def _inline_to_storage(text: str) -> str:
     out = re.sub(r"`([^`]+)`", r"<code>\1</code>", out)
     out = re.sub(r"\*\*([^*]+)\*\*", r"<strong>\1</strong>", out)
     out = re.sub(r"(?<!\w)_([^_]+)_(?!\w)", r"<em>\1</em>", out)
+    # `![alt](attachment:file.png)` embeds a file attached to the same page.
+    out = re.sub(
+        r"!\[([^\]]*)\]\(attachment:([^)\s]+)\)",
+        r'<ac:image ac:alt="\1"><ri:attachment ri:filename="\2"/></ac:image>',
+        out,
+    )
     out = re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r'<a href="\2">\1</a>', out)
+    # `[Status: X]` is how a status macro reads in Markdown; publish it as one.
+    out = re.sub(r"\[Status:\s*([^\]]+?)\s*\]", _status_macro, out)
     return out
 
 
-def markdown_to_storage(markdown: str) -> str:
+# Colour for a status label. The Markdown form drops the colour, so pick it
+# from the word; anything unrecognised is Grey, Confluence's neutral default.
+_STATUS_COLOURS = {
+    "Red": {"must", "blocker", "blocked", "high", "critical", "rejected"},
+    "Yellow": {"should", "medium", "in review", "in progress", "at risk"},
+    "Green": {"could", "low", "approved", "done", "complete", "on track"},
+    "Blue": {"in design", "proposed"},
+}
+
+
+def _status_macro(match: re.Match[str]) -> str:
+    title = match.group(1)
+    colour = next((c for c, words in _STATUS_COLOURS.items() if title.lower() in words), "Grey")
+    return (
+        '<ac:structured-macro ac:name="status">'
+        f'<ac:parameter ac:name="colour">{colour}</ac:parameter>'
+        f'<ac:parameter ac:name="title">{title}</ac:parameter>'
+        "</ac:structured-macro>"
+    )
+
+
+def markdown_to_storage(markdown: str, attachment_page: str = "") -> str:
     """Convert Markdown to Confluence storage format.
 
     Covers the subset this toolkit actually produces: headings, paragraphs,
-    bullet and numbered lists, checkboxes, fenced code, rules and pipe tables.
+    bullet and numbered lists, checkboxes, fenced code, rules, pipe tables,
+    ``[Status: X]`` labels and ``![alt](attachment:file.png)`` images.
+
+    Images resolve against the page's own attachments, or against the page
+    titled ``attachment_page`` in the same space when one is given.
     """
+    storage = _markdown_to_storage(markdown)
+    if attachment_page:
+        title = _escape(attachment_page).replace('"', "&quot;")
+        ref = f'<ri:page ri:content-title="{title}"/>'
+        storage = re.sub(
+            r'<ri:attachment ri:filename="([^"]+)"/>',
+            lambda m: f'<ri:attachment ri:filename="{m.group(1)}">{ref}</ri:attachment>',
+            storage,
+        )
+    return storage
+
+
+def _markdown_to_storage(markdown: str) -> str:
     lines = markdown.replace("\r\n", "\n").split("\n")
     out: list[str] = []
     list_tag: str | None = None

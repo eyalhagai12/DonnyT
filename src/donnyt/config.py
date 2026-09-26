@@ -224,6 +224,18 @@ class Config:
         return str(self._get("confluence.mr_template_title", default="Merge Request Template"))
 
     @property
+    def prd_template_page_id(self) -> str:
+        return str(self._get("confluence.prd_template_page_id", default="") or "")
+
+    @property
+    def prd_template_title(self) -> str:
+        return str(self._get("confluence.prd_template_title", default="PRD Template"))
+
+    @property
+    def prd_parent_page_id(self) -> str:
+        return str(self._get("confluence.prd_parent_page_id", default="") or "")
+
+    @property
     def sprint_plan_parent_page_id(self) -> str:
         return str(self._get("confluence.sprint_plan_parent_page_id", default="") or "")
 
@@ -278,6 +290,31 @@ class Config:
     def vault_path(self) -> Path:
         path = Path(str(self._get("vault.path", default="vault")))
         return path if path.is_absolute() else (self.root / path)
+
+    # -- ui mockups --------------------------------------------------------
+    def _path(self, dotted: str, default: str) -> Path:
+        path = Path(str(self._get(dotted, default=default) or default))
+        return path if path.is_absolute() else (self.root / path)
+
+    @property
+    def ui_browser(self) -> str:
+        return str(self._get("ui.browser", default="") or "")
+
+    @property
+    def ui_style_dir(self) -> Path:
+        return self._path("ui.style_dir", "ui-style")
+
+    @property
+    def ui_mocks_dir(self) -> Path:
+        return self._path("ui.mocks_dir", "mocks")
+
+    @property
+    def ui_profile_dir(self) -> Path:
+        return self.root / ".donnyt" / "browser-profile"
+
+    @property
+    def ui_size(self) -> tuple[int, int]:
+        return int(self._get("ui.width", default=1440)), int(self._get("ui.height", default=900))
 
     # -- helpers -----------------------------------------------------------
     def _get(self, dotted: str, default: Any = None, required: bool = False) -> Any:
