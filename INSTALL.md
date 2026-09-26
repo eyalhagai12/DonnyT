@@ -120,13 +120,17 @@ bundle that fails this check.
 ### A4. Zip it
 
 Include `vendor/wheels/`. Exclude anything machine-specific and anything
-secret:
+secret. Zip the fresh clone from A1, not a working copy you have developed in:
+a working copy also holds the local test stack's credentials, vault and
+generated mockups under `test/devstack/`.
 
 ```bash
 # from the parent directory
 zip -r DonnyT.zip DonnyT \
     -x "DonnyT/.git/*" "DonnyT/.venv/*" "DonnyT/.env" \
-       "DonnyT/config.toml" "DonnyT/.mcp.json" \
+       "DonnyT/config.toml" "DonnyT/.mcp.json" "DonnyT/.mcp.json.*" \
+       "DonnyT/test/devstack/.env" "DonnyT/test/devstack/donnyt/*" \
+       "DonnyT/ui-style/*" "DonnyT/mocks/*" "DonnyT/.donnyt/*" \
        "DonnyT/**/__pycache__/*"
 ```
 
@@ -134,14 +138,17 @@ PowerShell:
 
 ```powershell
 Get-ChildItem DonnyT -Recurse -Force |
-  Where-Object { $_.FullName -notmatch '\\(\.git|\.venv|__pycache__)\\' -and
-                 $_.Name -notin '.env','config.toml','.mcp.json' } |
+  Where-Object { $_.FullName -notmatch '\\(\.git|\.venv|__pycache__|\.donnyt|ui-style|mocks)\\' -and
+                 $_.FullName -notmatch '\\test\\devstack\\donnyt\\' -and
+                 $_.Name -notin '.env','config.toml','.mcp.json' -and
+                 $_.Name -notlike '.mcp.json.*' } |
   Compress-Archive -DestinationPath DonnyT.zip
 ```
 
-> **Never ship `.env`.** It holds live API tokens. It is in `.gitignore`, but a
-> zip of the working directory will pick it up unless excluded. Check before
-> you hand the file over.
+> **Never ship `.env`.** The one at the root holds live API tokens, and so do
+> `test/devstack/.env` and `test/devstack/donnyt/.env`. They are in
+> `.gitignore`, but a zip of the working directory picks them up unless
+> excluded. List the zip's contents before you hand the file over.
 
 ---
 
