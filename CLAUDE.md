@@ -62,8 +62,12 @@ aspirational — it is the deployment target.
 
 - **Confirm before anything the team sees.** Creating an MR, creating a sprint,
   moving issues, publishing to Confluence — show the content, then ask.
-- **Size sprints on `completed` points, never `committed`.** The distinction is
-  the entire point of `jira_velocity`.
+- **Size sprints on `completed` work, never `committed`.** The distinction is
+  the entire point of `jira_velocity`. The team may not estimate: issue counts
+  are a first-class measure, and an unestimated issue is never dropped.
+- **Sprint planning starts from the lead's brief** (`Sprints/<name>.md`, read
+  with `vault_sprint_brief`). Its vectors outrank people's Focus: goals decide
+  what goes in, focus only who does it, and every conflict goes to the lead.
 - **Person notes are private.** Never publish 1:1 or person-note content to
   Confluence or GitLab. Report what the record shows; don't editorialise about
   someone's performance.
@@ -84,6 +88,16 @@ python -m donnyt.cli doctor
 
 ## Gotchas
 
+- A sprint brief's file name **is** the Jira sprint name: `sync_sprint` writes
+  `Sprints/<sprint.name>.md`, so the Jira facts land below the brief in the
+  same file. Generated sections go in managed blocks only; the brief's own
+  `##` sections are the lead's. `sections()` skips managed blocks so they
+  never read back as brief content.
+- A sprint counts as estimated at `jira.ESTIMATED_SHARE` (80%) of issues with
+  points; only those feed `average_completed_points`, which is `None` when
+  there are none, never 0.
+- Note frontmatter is a small YAML subset: no inline `# comments` (they become
+  part of the value), and an empty key parses as `[]`.
 - `repo_root()` must not be derived from `__file__` alone; an installed copy
   lives in `site-packages`. It checks `DONNYT_HOME`, then the working directory,
   then the module path, keying off `config.example.toml`.

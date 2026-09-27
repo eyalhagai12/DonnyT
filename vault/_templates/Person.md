@@ -1,5 +1,6 @@
 ---
 type: person
+role: ""
 jira: ""
 gitlab: ""
 capacity: 0
@@ -8,6 +9,14 @@ tags:
 ---
 
 # {{title}}
+
+## Focus
+
+%% What you want them working on and steered toward right now. Sprint
+planning reads this section — goals still come first, focus decides who
+does what. %%
+
+-
 
 ## Context
 

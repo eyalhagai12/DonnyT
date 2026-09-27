@@ -349,6 +349,21 @@ class Config:
     def total_capacity(self) -> float:
         return sum(m.capacity for m in self.members)
 
+    @property
+    def weekend(self) -> list[str]:
+        """Non-working weekdays as three-letter names, for counting sprint days."""
+        days = self._get("team.weekend", default=["Sat", "Sun"]) or []
+        bad = [str(d) for d in days if str(d)[:3].title() not in WEEKDAYS]
+        if bad:
+            raise ConfigError(
+                f"team.weekend in config.toml has {', '.join(bad)}; use day names like "
+                '["Fri", "Sat"] (INSTALL.md step 5, team roster).'
+            )
+        return [str(d)[:3].title() for d in days]
+
+
+WEEKDAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+
 
 @lru_cache(maxsize=1)
 def load_config() -> Config:

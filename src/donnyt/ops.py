@@ -370,7 +370,22 @@ def vault_sync(sprints_back: int = 3, include_mrs: bool = True) -> dict[str, Any
     return GraphBuilder().sync_all(sprints_back, include_mrs)
 
 
-def vault_sync_sprint(sprint_id: int = 0) -> dict[str, Any]:
+def vault_sprint_brief(title: str) -> dict[str, Any]:
+    from .graph import GraphBuilder
+    from .vault import SPRINT_BRIEF_TEMPLATE
+
+    try:
+        return GraphBuilder().sprint_brief(title)
+    except LookupError:
+        raise OpError(
+            "no_brief",
+            f"No sprint brief titled {title!r} in the vault's Sprints/ folder. Copy "
+            f"{SPRINT_BRIEF_TEMPLATE} to Sprints/<sprint name>.md and fill it in; "
+            "the file name becomes the Jira sprint name.",
+        ) from None
+
+
+def vault_sync_sprint(sprint_id: int = 0, plan: str = "") -> dict[str, Any]:
     from .graph import GraphBuilder
     from .jira import JiraClient
 
@@ -384,7 +399,7 @@ def vault_sync_sprint(sprint_id: int = 0) -> dict[str, Any]:
     if not sprint:
         raise OpError("not_found", f"No sprint {sprint_id or '(active)'}.")
     issues = jira.sprint_issues(sprint.id)
-    title = builder.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint))
+    title = builder.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint), plan)
     return {"note": title, "sprint": sprint.as_dict(), "issues": len(issues)}
 
 

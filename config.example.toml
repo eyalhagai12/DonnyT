@@ -137,6 +137,11 @@ height = 900
 # Copy the block per person. Delete the example.
 # ---------------------------------------------------------------------------
 
+[team]
+# Days nobody works, for counting working days in a sprint brief.
+# Israel and much of the Middle East: ["Fri", "Sat"].
+weekend = ["Sat", "Sun"]
+
 [[team.members]]
 name = "Example Person"
 jira = ""

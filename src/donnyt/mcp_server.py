@@ -172,19 +172,24 @@ def jira_backlog(limit: int = 60) -> Any:
 
 @mcp.tool()
 def jira_velocity(sprints_back: int = 5) -> Any:
-    """Completed story points per recent closed sprint, plus the average.
+    """Completed work per recent closed sprint -- issues and story points -- plus the averages.
 
-    Size the next sprint against `average_completed_points`, not against
-    what was committed.
+    `average_completed_issues` is always there. `average_completed_points`
+    covers only sprints where most issues were estimated (`estimated` per
+    sprint, `estimated_sprints` in total) and is null when none were: a team
+    that doesn't estimate has no points velocity, not a velocity of 0. Size
+    against completed work, never against what was committed.
     """
     return _guard(ops.jira_velocity, sprints_back)
 
 
 @mcp.tool()
 def jira_workload(sprint_id: int = 0) -> Any:
-    """Points per assignee in a sprint, compared against configured capacity.
+    """Issues and points per assignee in a sprint, compared against configured capacity.
 
-    `over_by` is positive where someone is loaded beyond their capacity.
+    Each person has `issues`, `unestimated` (issues with no points) and
+    `points`; `over_by` is positive where someone's points exceed their
+    capacity. With unestimated work, compare issue counts, not points.
     """
     return _guard(ops.jira_workload, sprint_id)
 
@@ -356,9 +361,37 @@ def vault_sync(sprints_back: int = 3, include_mrs: bool = True) -> Any:
 
 
 @mcp.tool()
-def vault_sync_sprint(sprint_id: int = 0) -> Any:
-    """Write one sprint's note from Jira. Defaults to the active sprint."""
-    return _guard(ops.vault_sync_sprint, sprint_id)
+def vault_sprint_brief(title: str) -> Any:
+    """Read the lead's sprint brief, `Sprints/<title>.md`: the input to sprint planning. Call it first.
+
+    Returns `start`/`end` and `working_days` (from the configured weekend);
+    `vectors`, the sprint's goals, in priority order; `availability` and
+    `on_call` (table rows, or the section's text if it is not a table);
+    `must_include` / `keep_out` issue keys; `notes` and `other_sections`
+    (any heading the template doesn't have, as text); `people`, with each
+    roster member's and each named person's `role` and `focus` from their
+    person note, whether they can be assigned (`in_roster`, `jira_set`);
+    `jira_sprint`, the open Jira sprint that already has this name (update it
+    rather than create a second); and `missing`, the facts to ask the user
+    for before planning.
+
+    `focus` is private: use it to decide assignments, never quote it in
+    Jira, Confluence or GitLab.
+    """
+    return _guard(ops.vault_sprint_brief, title)
+
+
+@mcp.tool()
+def vault_sync_sprint(sprint_id: int = 0, plan: str = "") -> Any:
+    """Write one sprint's note from Jira. Defaults to the active sprint.
+
+    The note is `Sprints/<sprint name>.md`; if a sprint brief of that name
+    exists, the Jira facts go below it and the brief is kept. Pass `plan`
+    (Markdown) after planning to record the reasoning: what was picked for
+    which vector, what was cut and why, how it was sized, focus conflicts.
+    A later sync without `plan` keeps the last one.
+    """
+    return _guard(ops.vault_sync_sprint, sprint_id, plan)
 
 
 @mcp.tool()

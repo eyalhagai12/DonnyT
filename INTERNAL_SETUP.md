@@ -210,15 +210,17 @@ python -m donnyt.cli velocity --sprints-back 3
 
 **Expect:** the first prints your active sprint (name, dates, goal — goal may
 be empty, that's fine). The second prints a `history` list with 1–3 entries,
-each with `committed_points` and `completed_points`, plus an
-`average_completed_points` at the end.
+each with `issues_done`, `completed_points` and `estimated`, plus
+`average_completed_issues` and `average_completed_points` at the end.
+`average_completed_points` is `null` when the team doesn't estimate: that is
+expected, not an error.
 
 **If this fails:**
 - Empty `sprints` output with no error — you're pointed at the right board but
   there's genuinely no active sprint right now. Not a bug.
 - `error` mentioning `board_id` — `doctor` already validates this; re-run it,
   it lists the valid board ids for your project key.
-- `average_completed_points: 0.0` with an empty `history` — there are no
+- `average_completed_issues: null` with an empty `history` — there are no
   *closed* sprints yet on this board, or `jira.done_statuses` in
   `config.toml` doesn't match your workflow's actual status names
   (capitalization matters). Check a closed issue's status name in Jira and

@@ -17,6 +17,11 @@ from typing import Any
 from ._http import JSONClient
 from .config import Config, load_config
 
+# A sprint counts as estimated when at least this share of its issues has
+# points. Only those sprints feed the points average: an unestimated sprint's
+# "0 points completed" says nothing about how much the team finished.
+ESTIMATED_SHARE = 0.8
+
 
 @dataclass
 class Issue:
@@ -261,10 +266,12 @@ class JiraClient:
 
     # -- analysis ----------------------------------------------------------
     def velocity(self, board_id: int | None = None, sprints_back: int = 5) -> dict[str, Any]:
-        """Completed points per closed sprint, plus the mean.
+        """Completed work per closed sprint, in issues and in points, plus the means.
 
-        This is the number sprint planning should size against -- what the team
-        actually finished, not what it committed to.
+        This is what sprint planning should size against -- what the team
+        actually finished, not what it committed to. Issue counts are always
+        there; the points mean covers only sprints that were estimated, so a
+        team that has not started estimating gets ``None`` rather than 0.
         """
         closed = self.sprints(board_id, state="closed")
         recent = sorted(closed, key=lambda s: (s.end or "", s.id), reverse=True)[:sprints_back]
@@ -280,23 +287,32 @@ class JiraClient:
                 issue for issue, last in members
                 if last == sprint.id and issue.status in self.config.done_statuses
             ]
-            completed = sum(i.points or 0 for i in done)
-            committed = sum(i.points or 0 for i in issues)
+            unestimated = sum(1 for i in issues if i.points is None)
             history.append(
                 {
                     "sprint": sprint.name,
                     "id": sprint.id,
                     "ended": sprint.end,
-                    "committed_points": committed,
-                    "completed_points": completed,
+                    "committed_points": sum(i.points or 0 for i in issues),
+                    "completed_points": sum(i.points or 0 for i in done),
                     "issues_done": len(done),
                     "issues_total": len(issues),
+                    "issues_unestimated": unestimated,
+                    "estimated": bool(issues) and (len(issues) - unestimated) / len(issues) >= ESTIMATED_SHARE,
                 }
             )
 
-        completed_values = [h["completed_points"] for h in history]
-        average = round(sum(completed_values) / len(completed_values), 1) if completed_values else 0.0
-        return {"history": history, "average_completed_points": average, "sprints_sampled": len(history)}
+        def mean(values: list[float]) -> float | None:
+            return round(sum(values) / len(values), 1) if values else None
+
+        estimated = [h for h in history if h["estimated"]]
+        return {
+            "history": history,
+            "sprints_sampled": len(history),
+            "average_completed_issues": mean([h["issues_done"] for h in history]),
+            "average_completed_points": mean([h["completed_points"] for h in estimated]),
+            "estimated_sprints": len(estimated),
+        }
 
     def done_in(self, sprint: Sprint) -> list[Issue]:
         """Issues finished in ``sprint``.
@@ -311,26 +327,36 @@ class JiraClient:
         return [i for i, last in self._sprint_members(sprint.id) if last == sprint.id and i.status in done]
 
     def workload(self, sprint_id: int) -> dict[str, Any]:
-        """Points per assignee in a sprint, measured against configured capacity."""
+        """Issues and points per assignee in a sprint, measured against configured capacity.
+
+        Unestimated issues are counted, not treated as zero-point work.
+        """
         issues = self.sprint_issues(sprint_id)
         per_person: dict[str, dict[str, Any]] = {}
         for issue in issues:
             who = issue.assignee or "Unassigned"
-            entry = per_person.setdefault(who, {"assignee": who, "points": 0.0, "issues": 0})
+            entry = per_person.setdefault(
+                who, {"assignee": who, "points": 0.0, "issues": 0, "unestimated": 0}
+            )
             entry["points"] += issue.points or 0
             entry["issues"] += 1
+            entry["unestimated"] += issue.points is None
 
         for entry in per_person.values():
             member = self.config.member_by(entry["assignee"])
             capacity = member.capacity if member else 0.0
             entry["capacity"] = capacity
-            entry["over_by"] = round(entry["points"] - capacity, 1) if capacity else None
+            # Points say nothing about someone whose work is all unestimated.
+            estimated = entry["unestimated"] < entry["issues"]
+            entry["over_by"] = round(entry["points"] - capacity, 1) if capacity and estimated else None
 
         return {
             "sprint_id": sprint_id,
+            "issues": len(issues),
+            "unestimated_issues": sum(1 for i in issues if i.points is None),
             "total_points": round(sum(e["points"] for e in per_person.values()), 1),
             "team_capacity": self.config.total_capacity,
-            "by_assignee": sorted(per_person.values(), key=lambda e: -e["points"]),
+            "by_assignee": sorted(per_person.values(), key=lambda e: (-e["points"], -e["issues"])),
         }
 
     # -- internals ---------------------------------------------------------

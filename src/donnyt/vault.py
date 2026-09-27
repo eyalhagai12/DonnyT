@@ -41,6 +41,10 @@ FOLDERS = {
     "topic": "Topics",
 }
 
+# The sprint brief a lead writes before planning, in Sprints/. The toolkit
+# fills in the Jira facts below it once the sprint exists.
+SPRINT_BRIEF_TEMPLATE = "_templates/Sprint.md"
+
 
 # -- frontmatter ----------------------------------------------------------
 # A deliberately small YAML subset: scalars and flat lists, which is all
@@ -170,6 +174,106 @@ def link(title: str, alias: str | None = None) -> str:
 
 def links(titles: list[str]) -> list[str]:
     return [link(t) for t in titles if t]
+
+
+def unlink(text: str) -> str:
+    """``[[Target|alias]]`` -> ``Target``: the note a cell or bullet names."""
+    return re.sub(r"\[\[([^\]|#]+)(?:[#|][^\]]*)?\]\]", lambda m: m.group(1).strip(), text).strip()
+
+
+# -- reading hand-written notes -------------------------------------------
+# Briefs and person notes are written by people, in Obsidian. These read the
+# few shapes they use -- ## sections, bullet lists, tables -- and tolerate
+# everything else by returning it as text.
+
+_HEADING = re.compile(r"^(#{1,2})\s+(.+?)\s*#*\s*$")
+
+
+def sections(body: str) -> dict[str, str]:
+    """Every ``## heading`` in a note, mapped to the text under it.
+
+    Managed blocks are left out: they hold generated content, not what the
+    author wrote. So are comments -- ``%% … %%`` (Obsidian's, hidden when
+    reading) and ``<!-- … -->`` -- which is where templates put guidance.
+    """
+    text = re.sub(r"<!-- donnyt:begin (\S+) -->.*?<!-- donnyt:end \1 -->", "", body, flags=re.S)
+    text = re.sub(r"%%.*?%%|<!--.*?-->", "", text, flags=re.S)
+    found: dict[str, str] = {}
+    current: str | None = None
+    lines: list[str] = []
+    for line in text.split("\n"):
+        match = _HEADING.match(line)
+        if match:
+            if current is not None:
+                found[current] = "\n".join(lines).strip()
+            current = match.group(2) if len(match.group(1)) == 2 else None
+            lines = []
+        elif current is not None:
+            lines.append(line)
+    if current is not None:
+        found[current] = "\n".join(lines).strip()
+    return found
+
+
+def section(body: str, heading: str) -> str:
+    """The text under ``## heading`` (case-insensitive), or ``""``."""
+    wanted = heading.strip().lower()
+    return next((text for name, text in sections(body).items() if name.lower() == wanted), "")
+
+
+def bullets(text: str) -> list[str]:
+    """Non-empty ``-``/``*`` list items. A lone ``-`` placeholder is skipped."""
+    items = (re.match(r"^\s*[-*+]\s+(.*)$", line) for line in text.split("\n"))
+    return [m.group(1).strip() for m in items if m and m.group(1).strip()]
+
+
+def _cells(row: str) -> list[str]:
+    """Split a table row on ``|``, except inside ``[[a|b]]`` or when escaped."""
+    text = row.strip()
+    text = text[1:] if text.startswith("|") else text
+    text = text[:-1] if text.endswith("|") and not text.endswith("\\|") else text
+    cells: list[str] = []
+    buf: list[str] = []
+    depth = i = 0
+    while i < len(text):
+        pair = text[i : i + 2]
+        if pair == "[[" or (pair == "]]" and depth):
+            depth += 1 if pair == "[[" else -1
+            buf.append(pair)
+            i += 2
+        elif pair == "\\|":  # Obsidian escapes the alias pipe inside tables
+            buf.append("|")
+            i += 2
+        elif text[i] == "|" and not depth:
+            cells.append("".join(buf).strip())
+            buf = []
+            i += 1
+        else:
+            buf.append(text[i])
+            i += 1
+    cells.append("".join(buf).strip())
+    return cells
+
+
+def parse_table(text: str) -> list[dict[str, str]]:
+    """The first Markdown table in ``text``, as rows keyed by header.
+
+    Wikilinks are unwrapped to the note they name. Rows with nothing in them
+    but placeholders (``—``, ``-``) are dropped, so an unfilled template row
+    is not a person.
+    """
+    rows = [line for line in text.split("\n") if line.strip().startswith("|")]
+    if len(rows) < 2:
+        return []
+    header = [unlink(c) for c in _cells(rows[0])]
+    body = rows[2:] if re.fullmatch(r"[\s|:\-]+", rows[1]) else rows[1:]
+    table = []
+    for row in body:
+        values = [unlink(c) for c in _cells(row)]
+        if all(v in ("", "-", "—", "–") for v in values):
+            continue
+        table.append({h: (values[i] if i < len(values) else "") for i, h in enumerate(header)})
+    return table
 
 
 # -- the vault ------------------------------------------------------------

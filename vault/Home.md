@@ -19,15 +19,15 @@ so that last quarter stays answerable.
 
 ## Folders
 
-| Folder | What lives here |
-| --- | --- |
-| `People/` | One note per team member. 1:1s, growth, context. |
-| `Sprints/` | One per sprint: goal, workload, issues. |
-| `MRs/` | Merge requests worth remembering. |
-| `Projects/` | Longer arcs that span sprints. |
-| `Decisions/` | Context, decision, consequences. |
-| `Meetings/` | Retros, planning, skip-levels. |
-| `Topics/` | Everything else worth linking. |
+| Folder       | What lives here                                  |
+| ------------ | ------------------------------------------------ |
+| `People/`    | One note per team member. Focus, 1:1s, growth, context. |
+| `Sprints/`   | One per sprint. Write the brief from `_templates/Sprint.md`; the rest is added from Jira. |
+| `MRs/`       | Merge requests worth remembering.                |
+| `Projects/`  | Longer arcs that span sprints.                   |
+| `Decisions/` | Context, decision, consequences.                 |
+| `Meetings/`  | Retros, planning, skip-levels.                   |
+| `Topics/`    | Everything else worth linking.                   |
 
 ## How notes stay fresh
 

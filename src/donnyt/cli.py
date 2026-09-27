@@ -56,7 +56,8 @@ TOOLS: dict[str, str] = {
     "vault_write_note": "vault-write TITLE --kind K --file PATH [--tag T ...] [--link TITLE ...]",
     "vault_record_decision": "record-decision TITLE --context C --decision D [--person P ...]",
     "vault_sync": "sync [--sprints-back N] [--no-mrs]",
-    "vault_sync_sprint": "sync-sprint [--sprint-id N]",
+    "vault_sprint_brief": "sprint-brief TITLE",
+    "vault_sync_sprint": "sync-sprint [--sprint-id N] [--plan-file PATH]",
     "vault_sync_mr": "sync-mr IID [--project P] [--summary TEXT]",
     "ui_style": "ui-style",
     "ui_login": "ui-login URL",
@@ -144,10 +145,10 @@ def build_parser() -> argparse.ArgumentParser:
     backlog = sub.add_parser("backlog", help="Board backlog in rank order.")
     backlog.add_argument("--limit", type=int, default=60)
 
-    velocity = sub.add_parser("velocity", help="Completed points per recent sprint.")
+    velocity = sub.add_parser("velocity", help="Completed issues and points per recent sprint.")
     velocity.add_argument("--sprints-back", type=int, default=5)
 
-    workload = sub.add_parser("workload", help="Points per assignee versus capacity.")
+    workload = sub.add_parser("workload", help="Issues and points per assignee versus capacity.")
     workload.add_argument("--sprint-id", type=int, default=0)
 
     create_sprint = sub.add_parser("create-sprint", help="Create a sprint on the board. Team-visible.")
@@ -226,6 +227,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sync_sprint = sub.add_parser("sync-sprint", help="Write one sprint's vault note.")
     sync_sprint.add_argument("--sprint-id", type=int, default=0)
+    sync_sprint.add_argument("--plan-file", default="", help="Planning reasoning (Markdown), or - for stdin.")
+
+    sprint_brief = sub.add_parser("sprint-brief", help="Read a sprint brief from the vault's Sprints/ folder.")
+    sprint_brief.add_argument("title", help="The brief's note title, which is also the Jira sprint name.")
 
     sync_mr = sub.add_parser("sync-mr", help="Write one merge request's vault note.")
     sync_mr.add_argument("iid", type=int)
@@ -353,7 +358,8 @@ _HANDLERS: dict[str, Any] = {
     ),
     # vault
     "sync": lambda a: ops.vault_sync(a.sprints_back, not a.no_mrs),
-    "sync-sprint": lambda a: ops.vault_sync_sprint(a.sprint_id),
+    "sync-sprint": lambda a: ops.vault_sync_sprint(a.sprint_id, _read_text(a.plan_file) if a.plan_file else ""),
+    "sprint-brief": lambda a: ops.vault_sprint_brief(a.title),
     "sync-mr": lambda a: ops.vault_sync_mr(a.iid, a.project, a.summary),
     "vault-search": lambda a: ops.vault_search(a.query, a.limit),
     "vault-read": lambda a: ops.vault_read(a.title),

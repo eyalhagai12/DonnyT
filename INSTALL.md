@@ -330,6 +330,14 @@ On Data Center it is the username shown on their profile.
 > `name` must match the Jira display name **exactly**, or assignees will not
 > resolve to the right person note.
 
+If your week is not Monday to Friday, say so. Sprint briefs count working days
+from it:
+
+```toml
+[team]
+weekend = ["Fri", "Sat"]   # default ["Sat", "Sun"]
+```
+
 ### Step 6 — Verify
 
 ```powershell

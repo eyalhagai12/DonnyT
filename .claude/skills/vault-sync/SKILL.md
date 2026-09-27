@@ -30,8 +30,8 @@ sync. Write outside it instead.
 
 | Folder | Type | What it holds |
 | --- | --- | --- |
-| `People/` | `person` | One per team member. 1:1s, growth, context. |
-| `Sprints/` | `sprint` | One per sprint: goal, workload, issues. |
+| `People/` | `person` | One per team member. Focus, 1:1s, growth, context. |
+| `Sprints/` | `sprint` | One per sprint. Starts as the lead's brief (`_templates/Sprint.md`); goal, workload, issues and plan are added below it. |
 | `MRs/` | `mr` | Notable merge requests and why they mattered. |
 | `Projects/` | `epic` | Longer arcs spanning sprints. |
 | `Decisions/` | `decision` | ADR-shaped: context, decision, consequences. |

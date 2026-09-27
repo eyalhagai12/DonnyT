@@ -1,95 +1,145 @@
 ---
 name: sprint-plan
-description: Plan the next sprint from Jira — velocity, capacity, backlog selection and a written plan. Use when the user says "plan the sprint", "sprint planning", "what goes in the next sprint", "capacity", "velocity", or is preparing for a planning session.
+description: Turn the lead's sprint brief (vault/Sprints/<name>.md) into a Jira sprint — goals first, then availability, then people's focus — with or without story points. Use when the user says "plan the sprint", "sprint planning", "create the sprint from the brief", "what goes in the next sprint", "capacity", "velocity", or is preparing for a planning session.
 ---
 
-# Plan a sprint
+# Plan a sprint from the brief
 
-Produce a plan the team can actually commit to: sized against what they have
-historically *finished*, balanced per person, and written down where it can be
-found again.
+The lead writes a **sprint brief** before each sprint: a note in the vault's
+`Sprints/` folder, from `_templates/Sprint.md`, holding the dates, the
+**vectors** (the sprint's goals and their measures), who is away, who is on
+call, and anything else that matters. People notes carry each person's
+**Focus**. Your job is to turn the brief into a sprint the team can finish,
+and, once the lead approves it, create it in Jira.
+
+The team's process is still forming. Issues may have no story points. Some
+may have points, and later all of them will. Follow what the brief and the
+data say, and never impose a sizing method.
+
+## Priorities, in this order
+
+1. **Vectors decide what goes in.** The sprint exists to move its goals.
+2. **Availability decides how much.**
+3. **Focus decides who does it.** Focus matters, but it never pushes goal
+   work out. When the two conflict, the goal wins and the lead decides. List
+   every conflict.
 
 ## Steps
 
-### 1. Establish the baseline
+### 1. Read the brief
 
-Call these before proposing anything:
+- Use the brief the user names. Otherwise look for a sprint note with
+  `status: draft` (`vault_search` for `status: draft`). If there is none,
+  say so and offer to copy the template to `Sprints/<sprint name>.md` for
+  them to fill in. **Do not write the brief's content yourself.** The dates,
+  goals and availability are the lead's to state.
+- Call `vault_sprint_brief` with its title. Ask about everything in
+  `missing` before going on. A brief without vectors can still be planned,
+  but ask what the sprint is for first.
+- If `jira_sprint` is set, a sprint of this name already exists. Plan into
+  it and update it; don't create a second one.
+- Anyone in `people` with `in_roster: false` or `jira_set: false` cannot be
+  assigned. Say so, and point at `[[team.members]]` in `config.toml`.
 
-- `jira_velocity` — completed points per recent closed sprint, plus the mean.
-  This is the number to size against. Committed points are not evidence.
-- `jira_sprints` with `state: "active"` — what is still in flight.
-- `jira_workload` on the active sprint — who is already loaded.
+### 2. Gather the rest
 
-If velocity has fewer than three sampled sprints, say so. A mean over two
-sprints is not a forecast, and the plan should be presented as a starting guess
-rather than a commitment.
+- `jira_sprints` with `state: "active"`, then `jira_sprint_issues` on it.
+  Unfinished work may carry over, so ask whether it moves into this sprint.
+- `jira_backlog`: the candidate pool, in rank order.
+- `jira_velocity`: past throughput. `average_completed_issues` is always
+  there. `average_completed_points` is there only once sprints were estimated
+  (`estimated_sprints`). With fewer than three sprints behind either number,
+  call it a rough guide, not a forecast.
 
-### 2. Account for spillover and availability
+### 3. Work out availability
 
-- Unfinished work in the active sprint carries over. Subtract it from available
-  capacity before selecting anything new.
-- Ask the user about leave, on-call, interviews and holidays for the coming
-  sprint. These are not in Jira and they routinely cost 20–30% of capacity.
-  Do not guess — ask, then adjust.
+For each person: `working_days` less their days off, less on-call time, less
+anything in their Notes ("50% interviews"). Present it as available days out
+of `working_days`. When the brief is vague ("some days off"), ask rather than
+guess. Holidays and freezes in Notes apply to everyone.
 
-Team capacity comes from `[[team.members]]` in `config.toml`. If the roster is
-empty or the capacities are all zero, say so and plan on velocity alone.
+### 4. Propose
 
-### 3. Select the work
+**What goes in, by vector:**
 
-Call `jira_backlog` for the ranked candidate pool, then propose a selection:
+- `must_include` goes in first, whatever else happens. `keep_out` stays out.
+- Then, for each vector in the brief's order, the backlog issues that move
+  it, in rank order. Say which vector each issue serves.
+- Work that serves no vector (bugs, maintenance) goes in only with room
+  left, and is labelled as such.
+- If A blocks B, both go in or neither does.
 
-- Fill to the **velocity average**, not to total capacity. Capacity is the
-  ceiling; velocity is the evidence.
-- Respect rank order unless there is a stated reason to deviate — and state it.
-- Flag unestimated issues. An issue with no points cannot be planned; either
-  get an estimate or leave it out.
-- Check dependencies: if A blocks B, either both go in or neither does.
-- Balance per person against their configured capacity, not evenly. Watch for
-  one person carrying every hard item.
+**How much:**
 
-### 4. Present it for review
+- Where issues have points and velocity has `average_completed_points`,
+  size against it, scaled by the share of team days available. Size on
+  completed points, never committed.
+- Where they don't, size by issue count: `average_completed_issues`, scaled
+  the same way. Say plainly that a count is a rough measure, since issues
+  vary in size, and point out any issue that looks much larger than the rest.
+- In a mix, show both: the points total of the estimated issues, and the
+  count of the unestimated ones.
+- **Unestimated issues are normal here.** List them and flag them; never
+  drop an issue for having no points.
 
-Show the proposed sprint as a table — issue, summary, points, assignee — with:
+**Who does it:**
 
-- total points versus velocity average and versus capacity,
-- per-person load,
-- anything deliberately excluded, and why,
-- the risks you can see (single points of failure, unestimated work,
-  dependencies on other teams).
+- Match issues to each person's `focus` and `role`, weighted by available
+  days (points, or issue count, per available day).
+- When goal work needs someone off their focus, because nobody on-focus
+  has room or the work needs their skills, assign it anyway and add it to
+  **Focus conflicts**.
+- Watch for one person carrying every hard item, or every on-call week.
 
-Then stop and let the user adjust. Do not create anything in Jira yet.
+### 5. Present it and stop
 
-### 5. Apply it, once approved
+Show:
 
-Only after explicit approval:
+- a table grouped by vector: issue, summary, points (or "—"), assignee;
+- the load per person against their available days;
+- **Focus conflicts**: the issue, the person, what their focus says, and why
+  the goal needed them;
+- what was left out and why, and the risks (unestimated work, dependencies
+  on other teams, on-call overlap, freezes).
 
-- `jira_create_sprint` if the sprint does not exist, with a real goal — one
-  sentence naming the outcome, not "finish the tickets".
-- `jira_add_to_sprint` with the agreed issue keys.
+Then let the lead adjust. **Do not touch Jira yet.**
 
-These change shared team state. Confirm before each.
+### 6. Apply it, once approved
 
-### 6. Write it down
+These change what the team sees, so confirm before each one:
 
-- `vault_sync_sprint` — the sprint note in Obsidian, linked to every person in
-  it.
-- `confluence_publish` — if the team reads plans in Confluence. Ask first;
-  publishing is visible to everyone.
+1. `jira_create_sprint` with the brief's title **exactly** as the name, the
+   brief's `start` and `end`, and a goal: one sentence drawn from the
+   vectors. If `jira_sprint` exists, use `jira_update_sprint` instead.
+2. `jira_add_to_sprint` with the agreed keys.
+3. `jira_assign`, one call per person.
 
-Record the reasoning, not just the selection. In six weeks the useful part is
-*why* something was cut.
+### 7. Close the loop
+
+Call `vault_sync_sprint` with the new `sprint_id` and `plan`: the Markdown
+reasoning. Include the issues per vector, how the sprint was sized, the
+focus conflicts and how each was settled, and what was cut and why. The
+Jira facts and the plan are added below the brief in the same file. Its
+`status` becomes `planned`, and the lead's text is untouched.
+
+`confluence_publish` only if the lead asks. Never include anyone's Focus, or
+anything from a person note, in what gets published.
 
 ## Running a retro instead
 
 When asked to look back rather than forward:
 
-1. `jira_sprint_issues` on the closed sprint.
-2. Compare committed against completed — `jira_velocity` has both.
-3. Identify what carried over and look for the pattern: consistently
-   underestimated issue types, work blocked on other teams, interrupt load.
-4. `vault_record_decision` for anything the team decides to change, so the
-   decision is linked to the people who made it.
+1. `vault_read` the sprint's note: the brief, its vectors, and the plan.
+2. `jira_sprint_issues` on the closed sprint, and `jira_velocity` for
+   committed against completed.
+3. For each vector, did its measure move? Say what the record shows. If
+   it cannot tell, say that too.
+4. Look at what carried over for the pattern: underestimated work, work
+   blocked on other teams, interrupt load, availability that was lower than
+   planned.
+5. `vault_record_decision` for anything the team decides to change, including
+   changes to how it plans. The process is still forming, and those
+   decisions are part of its history.
 
 ## If the donnyt tools are not available
 
@@ -99,4 +149,5 @@ every one has an identical CLI command. Run `python -m donnyt.cli tools` for
 the mapping, then use the commands through the shell (from the repo root, with
 the repo's `.venv` Python). Same data, same rules: the confirm-before-sending
 steps above apply unchanged. Pass long Markdown (MR descriptions, notes,
-pages) with `--file <path>` rather than inline.
+pages) with `--file <path>` rather than inline; the sprint plan goes to
+`sync-sprint --plan-file <path>`.
