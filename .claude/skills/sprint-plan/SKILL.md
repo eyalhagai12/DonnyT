@@ -92,11 +92,30 @@ off"), ask rather than guess. Holidays and freezes in Notes apply to everyone.
   **Focus conflicts**.
 - Watch for one person carrying every hard item, or every on-call week.
 
+**Nobody is left with room by accident:**
+
+- After the goal work is assigned, anyone with available days left over gets
+  more work. What that work is comes from the brief's `room` list:
+  - `room` empty: the default. The next backlog items, in rank order, that fit
+    the person's `focus` and fit in their remaining days.
+  - `room` set: follow it -- "bugs first", a named epic or issue keys, "docs
+    and tests", "leave Tamar free". It is the lead's call for this sprint and
+    it overrides the default, including leaving someone free on purpose.
+- Label these issues **room work**, not goal work, so a slip never reads as
+  a missed goal, and put them after the goal work in each person's order.
+- Room work must not block or delay goal work: no one takes room work before
+  their goal tickets, and anyone who is the named backup for a goal ticket
+  keeps enough days free to step in.
+- This is the lead's standing decision (recorded in the vault) while the
+  project is kicking off. If the lead changes it, follow the lead.
+
 ### 5. Present it and stop
 
 Show:
 
 - a table grouped by vector: issue, summary, points (or "—"), assignee;
+  then the **room work**, per person, and what rule chose it (the brief's
+  `room`, or the default);
 - the load per person against their available days;
 - **Focus conflicts**: the issue, the person, what their focus says, and why
   the goal needed them;

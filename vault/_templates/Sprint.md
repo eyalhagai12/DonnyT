@@ -38,6 +38,14 @@ only decides who does it. Add a measure where there is one, e.g.
 | --- | --- | --- |
 |  |  |  |
 
+## Room
+
+%% What anyone with spare room takes on this sprint. Leave it empty for the
+default: the next backlog items that fit their Focus. Or say what you want,
+e.g. "bugs first", "TEAM-40 epic", "docs and tests", "leave Tamar free". %%
+
+-
+
 ## Must include
 
 %% Issue keys that go in regardless, and why. %%

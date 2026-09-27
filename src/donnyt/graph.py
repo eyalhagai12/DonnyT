@@ -41,7 +41,7 @@ def _size(issues: list[Issue]) -> str:
 _STATUS = {"future": "planned", "active": "active", "closed": "closed"}
 
 # Brief sections the reader understands. Anything else is passed on as text.
-_BRIEF_SECTIONS = ("vectors", "availability", "on call", "must include", "keep out", "notes")
+_BRIEF_SECTIONS = ("vectors", "availability", "on call", "room", "must include", "keep out", "notes")
 
 
 def working_days(start: str, end: str, weekend: list[str]) -> int | None:
@@ -302,6 +302,9 @@ class GraphBuilder:
             "on_call_cost": on_call_cost,
             "must_include": keys("must include"),
             "keep_out": keys("keep out"),
+            # What spare room goes to; empty means the default (next backlog items
+            # that fit each person's Focus).
+            "room": listed("room"),
             "notes": section(body, "notes"),
             "other_sections": {
                 k: v for k, v in sections(body).items() if k.lower() not in _BRIEF_SECTIONS and v
