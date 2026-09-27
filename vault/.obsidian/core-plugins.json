@@ -26,5 +26,8 @@
   "slash-command": true,
   "editor-status": true,
   "sync": false,
-  "publish": false
+  "publish": false,
+  "footnotes": false,
+  "bases": true,
+  "webviewer": false
 }
