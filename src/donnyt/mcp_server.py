@@ -52,24 +52,6 @@ def _guard(fn, *args: Any, **kwargs: Any) -> Any:
 
 
 @mcp.tool()
-def confluence_get_mr_template(raw: bool = False) -> dict[str, Any]:
-    """Fetch the team's merge-request template from Confluence as Markdown.
-
-    Returns the template body plus its section headings. Use this before
-    writing any MR description so the description matches the team's agreed
-    structure rather than an invented one.
-
-    Set `raw=True` to get the untouched Confluence storage-format XHTML
-    instead of Markdown. Use this only to diagnose a template that converted
-    wrong: compare the raw XHTML against the Markdown to see which element
-    (a macro, a layout, a table) did not carry over, then either work around
-    it in the Markdown you write, or fix `src/donnyt/_html2md.py` to handle it
-    -- see INTERNAL_SETUP.md.
-    """
-    return _guard(ops.mr_template, raw)
-
-
-@mcp.tool()
 def confluence_get_prd_template(raw: bool = False) -> dict[str, Any]:
     """Fetch the team's product requirements document (PRD) template from Confluence as Markdown.
 
@@ -233,58 +215,14 @@ def jira_assign(issue_keys: list[str], assignee: str) -> Any:
 
 
 @mcp.tool()
-def gitlab_branch_summary(repo_path: str, target_branch: str = "") -> Any:
-    """Commits, changed files and diffstat on a local branch versus its target.
-
-    Reads the working repo on disk, so an MR description can be drafted before
-    the branch is pushed. `repo_path` is the path to the git checkout.
-    """
-    return _guard(ops.gitlab_branch_summary, repo_path, target_branch)
-
-
-@mcp.tool()
-def gitlab_compare(source: str, target: str = "", project: str = "") -> Any:
-    """Compare two refs on the GitLab server, returning commits and files."""
-    return _guard(ops.gitlab_compare, source, target, project)
-
-
-@mcp.tool()
 def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30) -> Any:
-    """List merge requests on the configured project."""
-    return _guard(ops.gitlab_list_mrs, state, author, limit)
+    """List merge requests on the configured project -- read-only history.
 
-
-@mcp.tool()
-def gitlab_create_mr(
-    source_branch: str,
-    title: str,
-    description: str,
-    target_branch: str = "",
-    project: str = "",
-    draft: bool = True,
-    labels: list[str] | None = None,
-) -> Any:
-    """Open a merge request.
-
-    Creates it as a draft by default. `description` should be the rendered
-    Confluence template -- fetch it with `confluence_get_mr_template` first.
+    `state` is opened, merged, closed or all. Who did what in a sprint is
+    already in its note's "Done by" section (`vault_sync_sprint`); reach for
+    this for anything else about past merged work.
     """
-    return _guard(
-        ops.gitlab_create_mr,
-        source_branch, title, description, target_branch, project, draft, labels,
-    )
-
-
-@mcp.tool()
-def gitlab_update_mr(
-    iid: int,
-    description: str = "",
-    title: str = "",
-    project: str = "",
-    labels: list[str] | None = None,
-) -> Any:
-    """Update an existing merge request's title, description, or labels."""
-    return _guard(ops.gitlab_update_mr, iid, description, title, project, labels)
+    return _guard(ops.gitlab_list_mrs, state, author, limit)
 
 
 # -------------------------------------------------------------------- vault
@@ -306,8 +244,8 @@ def vault_read(title: str) -> Any:
 def vault_links(title: str) -> Any:
     """Inbound and outbound links for a note -- its edges in the graph.
 
-    Backlinks on a person note are their history: every sprint, MR and
-    decision that referenced them.
+    Backlinks on a person note are their history: every sprint and decision
+    that referenced them.
     """
     return _guard(ops.vault_links, title)
 
@@ -329,7 +267,7 @@ def vault_write_note(
     """Write or refresh a note, preserving anything hand-written.
 
     Content goes inside a managed block, so prose you typed outside it survives
-    regeneration. `kind` is one of: person, sprint, mr, project, decision,
+    regeneration. `kind` is one of: person, sprint, project, decision,
     meeting, topic. `links_to` are note titles to link, forming graph edges.
     """
     return _guard(ops.vault_write_note, title, kind, markdown, tags, links_to)
@@ -351,13 +289,14 @@ def vault_record_decision(
 
 
 @mcp.tool()
-def vault_sync(sprints_back: int = 3, include_mrs: bool = True) -> Any:
-    """Pull recent sprints and open MRs from Jira and GitLab into the vault.
+def vault_sync(sprints_back: int = 3) -> Any:
+    """Pull the active sprint and recent closed ones from Jira and GitLab into the vault.
 
-    Creates or refreshes sprint notes, MR notes and the person notes they link
-    to. Run this before asking questions about team history.
+    Creates or refreshes each sprint note -- overview, workload, issues and
+    "Done by" (what each person finished, merged and reviewed) -- and the
+    person notes they link to. Run this before asking about team history.
     """
-    return _guard(ops.vault_sync, sprints_back, include_mrs)
+    return _guard(ops.vault_sync, sprints_back)
 
 
 @mcp.tool()
@@ -392,15 +331,6 @@ def vault_sync_sprint(sprint_id: int = 0, plan: str = "") -> Any:
     A later sync without `plan` keeps the last one.
     """
     return _guard(ops.vault_sync_sprint, sprint_id, plan)
-
-
-@mcp.tool()
-def vault_sync_mr(iid: int, project: str = "", summary: str = "") -> Any:
-    """Write a merge request's note, linking it to its Jira issue and author.
-
-    The Jira key is read from the branch name or MR title, e.g. `TEAM-1234`.
-    """
-    return _guard(ops.vault_sync_mr, iid, project, summary)
 
 
 # ----------------------------------------------------------------------- ui

@@ -3,7 +3,6 @@ type: person
 role: ""
 jira: ""
 gitlab: ""
-capacity: 0
 tags:
   - person
 ---

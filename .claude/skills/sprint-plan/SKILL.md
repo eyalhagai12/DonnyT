@@ -53,10 +53,11 @@ data say, and never impose a sizing method.
 
 ### 3. Work out availability
 
-For each person: `working_days` less their days off, less on-call time, less
-anything in their Notes ("50% interviews"). Present it as available days out
-of `working_days`. When the brief is vague ("some days off"), ask rather than
-guess. Holidays and freezes in Notes apply to everyone.
+For each person: `working_days` less their days off, less their on-call days
+times `on_call_cost` (the brief's share of a day that on-call takes; 1 = the
+whole day), less anything in their Notes ("50% interviews"). Present it as
+available days out of `working_days`. When the brief is vague ("some days
+off"), ask rather than guess. Holidays and freezes in Notes apply to everyone.
 
 ### 4. Propose
 
@@ -129,15 +130,19 @@ anything from a person note, in what gets published.
 
 When asked to look back rather than forward:
 
-1. `vault_read` the sprint's note: the brief, its vectors, and the plan.
-2. `jira_sprint_issues` on the closed sprint, and `jira_velocity` for
-   committed against completed.
+1. `vault_sync_sprint` on the closed sprint, then `vault_read` its note: the
+   brief, its vectors, the plan, and **Done by** -- what each person finished,
+   merged and reviewed.
+2. `jira_velocity` for committed against completed.
 3. For each vector, did its measure move? Say what the record shows. If
    it cannot tell, say that too.
 4. Look at what carried over for the pattern: underestimated work, work
    blocked on other teams, interrupt load, availability that was lower than
    planned.
-5. `vault_record_decision` for anything the team decides to change, including
+5. Open the retro with **Done by**: it is the sprint's record of each
+   person's work, meant to be shown. Credit what the record shows, and
+   nothing about anyone's performance beyond it.
+6. `vault_record_decision` for anything the team decides to change, including
    changes to how it plans. The process is still forming, and those
    decisions are part of its history.
 
@@ -148,6 +153,6 @@ On a host where the `mcp` package could not be installed, the `donnyt_*`,
 every one has an identical CLI command. Run `python -m donnyt.cli tools` for
 the mapping, then use the commands through the shell (from the repo root, with
 the repo's `.venv` Python). Same data, same rules: the confirm-before-sending
-steps above apply unchanged. Pass long Markdown (MR descriptions, notes,
-pages) with `--file <path>` rather than inline; the sprint plan goes to
+steps above apply unchanged. Pass long Markdown (notes, pages) with
+`--file <path>` rather than inline; the sprint plan goes to
 `sync-sprint --plan-file <path>`.

@@ -1,6 +1,6 @@
 ---
 name: vault-sync
-description: Maintain and query the Obsidian knowledge graph of the team — sprints, merge requests, people, decisions. Use when the user asks about team history, wants notes updated or synced, asks "what has X been working on", "when did we decide Y", "prep for a 1:1", or mentions the vault, Obsidian or the knowledge graph.
+description: Maintain and query the Obsidian knowledge graph of the team — sprints, who did what, people, decisions. Use when the user asks about team history, wants notes updated or synced, asks "what has X been working on", "when did we decide Y", "prep for a 1:1", or mentions the vault, Obsidian or the knowledge graph.
 ---
 
 # The team knowledge graph
@@ -32,7 +32,6 @@ sync. Write outside it instead.
 | --- | --- | --- |
 | `People/` | `person` | One per team member. Focus, 1:1s, growth, context. |
 | `Sprints/` | `sprint` | One per sprint. Starts as the lead's brief (`_templates/Sprint.md`); goal, workload, issues and plan are added below it. |
-| `MRs/` | `mr` | Notable merge requests and why they mattered. |
 | `Projects/` | `epic` | Longer arcs spanning sprints. |
 | `Decisions/` | `decision` | ADR-shaped: context, decision, consequences. |
 | `Meetings/` | `meeting` | Retros, planning, skip-levels. |
@@ -43,10 +42,11 @@ needs appending to their page for it to accumulate.
 
 ## Keeping it current
 
-- `vault_sync` — recent sprints and open MRs in one pass. Run it before
+- `vault_sync` — the active sprint and recent closed ones in one pass. Run it before
   answering any question about team history, so the answer is not stale.
-- `vault_sync_sprint` — one sprint.
-- `vault_sync_mr` — one merge request, linked to its Jira issue and author.
+- `vault_sync_sprint` — one sprint, including its **Done by**: what each person
+  finished (Jira), merged and reviewed (GitLab, read-only). That section is
+  safe to show the team — it is the sprint's record, not a person note.
 
 Sync is safe to re-run.
 
@@ -55,7 +55,8 @@ Sync is safe to re-run.
 Reach for the graph, not a full-text scan, when the question is relational:
 
 - *"What has Maya been working on?"* → `vault_links` on her note. Backlinks are
-  the answer: every sprint, MR and decision that named her.
+  the answer: every sprint and decision that named her. Each sprint note's
+  **Done by** section says what she finished, merged and reviewed in it.
 - *"When did we decide to drop the v1 API?"* → `vault_search` for the topic,
   then `vault_read` the decision note.
 - *"What happened in Sprint 14?"* → `vault_read` that sprint note.
@@ -76,7 +77,8 @@ for data, and link generously — an unlinked note is invisible in the graph.
 
 ## Preparing a 1:1
 
-1. `vault_links` on the person — recent sprints, MRs, decisions.
+1. `vault_links` on the person — recent sprints and decisions; the sprints'
+   **Done by** sections are the record of what they shipped.
 2. `jira_search` for their open issues.
 3. `vault_read` their note for what was discussed last time and anything
    outstanding.
@@ -94,5 +96,5 @@ On a host where the `mcp` package could not be installed, the `donnyt_*`,
 every one has an identical CLI command. Run `python -m donnyt.cli tools` for
 the mapping, then use the commands through the shell (from the repo root, with
 the repo's `.venv` Python). Same data, same rules: the confirm-before-sending
-steps above apply unchanged. Pass long Markdown (MR descriptions, notes,
+steps above apply unchanged. Pass long Markdown (notes,
 pages) with `--file <path>` rather than inline.

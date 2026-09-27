@@ -33,7 +33,6 @@ _END = "<!-- donnyt:end {} -->"
 FOLDERS = {
     "person": "People",
     "sprint": "Sprints",
-    "mr": "MRs",
     "epic": "Projects",
     "project": "Projects",
     "decision": "Decisions",

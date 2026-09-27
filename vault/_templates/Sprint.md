@@ -3,6 +3,7 @@ type: sprint
 status: draft
 start:
 end:
+on_call_cost: 1
 tags:
   - sprint
 ---
@@ -10,7 +11,8 @@ tags:
 # {{title}}
 
 %% Sprint brief. Save it as `Sprints/<sprint name>.md` — the file name becomes
-the Jira sprint name. Fill `start` and `end` above as `YYYY-MM-DD`. Every
+the Jira sprint name. Fill `start` and `end` above as `YYYY-MM-DD`, and
+`on_call_cost` as the share of a working day on-call takes (1 = all of it). Every
 section is optional; delete what doesn't apply, add headings if you need them.
 Then ask Claude to plan the sprint from it. The Jira facts are added below once
 the sprint exists; nothing you write here is overwritten. Text between double

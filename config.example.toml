@@ -43,19 +43,13 @@ auth = "auto"
 #   .../wiki/spaces/ENG/pages/12345/Title   ->   "ENG"
 space = "ENG"
 
-# The page holding your merge-request description template.
-# PREFER the numeric id: it survives the page being renamed.
-# Find it in the page URL: .../wiki/spaces/ENG/pages/123456789/MR+Template
-mr_template_page_id = ""
-
-# Fallback used only when mr_template_page_id is empty. Must match exactly.
-mr_template_title = "Merge Request Template"
-
 # Optional. Page to file published sprint plans under. Empty = space root.
 sprint_plan_parent_page_id = ""
 
 # Optional. The product requirements (PRD) template, used by the prd-write
-# skill. Same rules as the MR template: prefer the id, the title is a fallback.
+# skill. PREFER the numeric id: it survives the page being renamed. Find it in
+# the page URL: .../wiki/spaces/ENG/pages/123456790/PRD+Template. The title is
+# a fallback, used only when the id is empty; it must match exactly.
 prd_template_page_id = ""
 prd_template_title = "PRD Template"
 
@@ -91,12 +85,9 @@ done_statuses = ["Done", "Closed", "Resolved"]
 # Your GitLab instance. Self-hosted example: "https://gitlab.internal.corp"
 url = "https://gitlab.com"
 
-# Default project as "group/subgroup/repo", or its numeric id.
-# Leave empty to pass the project explicitly on every call.
+# The project whose merged work is credited to the team, as
+# "group/subgroup/repo" or its numeric id. DonnyT only reads it.
 default_project = ""
-
-# Branch merge requests target by default.
-default_target_branch = "main"
 
 
 [vault]
@@ -124,15 +115,17 @@ height = 900
 
 
 # ---------------------------------------------------------------------------
-# Team roster. Drives capacity planning and links Jira/GitLab identities to
-# the person notes in the vault.
+# Team roster. Links Jira and GitLab identities to the person notes in the
+# vault, so each sprint records who finished, merged and reviewed what.
 #
 #   name     - display name. MUST match the Jira display name exactly, so
 #              assignees resolve. This is also the vault note title.
 #   jira     - Jira accountId. Find it at:
 #              <site>/rest/api/3/user/search?query=<their-email>
-#   gitlab   - GitLab username, without the @.
-#   capacity - story points this person can take in a full sprint.
+#   gitlab   - GitLab username, without the @. Merged work and reviews are
+#              credited through it.
+#   capacity - optional. Story points this person can take in a full sprint;
+#              leave it out while the team does not estimate.
 #
 # Copy the block per person. Delete the example.
 # ---------------------------------------------------------------------------
@@ -146,4 +139,3 @@ weekend = ["Sat", "Sun"]
 name = "Example Person"
 jira = ""
 gitlab = ""
-capacity = 8

@@ -35,8 +35,10 @@ class Issue:
     labels: list[str] = field(default_factory=list)
     parent: str = ""
     url: str = ""
+    description: str = ""  # only when the issue was fetched on its own
 
     def as_dict(self) -> dict[str, Any]:
+        extra = {"description": self.description} if self.description else {}
         return {
             "key": self.key,
             "summary": self.summary,
@@ -48,7 +50,30 @@ class Issue:
             "labels": self.labels,
             "parent": self.parent,
             "url": self.url,
+            **extra,
         }
+
+
+def adf_text(node: Any) -> str:
+    """Plain text from an Atlassian Document Format tree -- Cloud's rich text.
+
+    Data Center returns wiki markup as a string, which passes straight through.
+    """
+    if isinstance(node, str):
+        return node
+    if not isinstance(node, dict):
+        return ""
+    kind = node.get("type")
+    if kind == "text":
+        return node.get("text", "")
+    if kind == "hardBreak":
+        return "\n"
+    inner = "".join(adf_text(child) for child in node.get("content") or [])
+    if kind == "listItem":
+        return "- " + inner.strip() + "\n"
+    if kind in ("paragraph", "heading", "codeBlock", "blockquote", "rule"):
+        return inner.strip() + "\n\n"
+    return inner
 
 
 @dataclass
@@ -407,6 +432,7 @@ class JiraClient:
             labels=list(fields.get("labels") or []),
             parent=parent.get("key", "") or (epic if isinstance(epic, str) else ""),
             url=f"{self.site}/browse/{raw.get('key', '')}",
+            description=adf_text(fields.get("description")).strip(),
         )
 
     @staticmethod

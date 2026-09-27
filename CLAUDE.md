@@ -1,7 +1,7 @@
 # DonnyT — working notes for Claude
 
-A team-lead toolkit: Confluence-templated GitLab MRs, Jira sprint planning, and
-an Obsidian knowledge graph. Read `README.md` for the shape of it and
+A team-lead toolkit: Jira sprint planning from a brief, a per-sprint record of
+who did what (Jira + read-only GitLab), and an Obsidian knowledge graph. Read `README.md` for the shape of it and
 `INSTALL.md` for setup.
 
 ## Hard constraints
@@ -31,7 +31,7 @@ aspirational — it is the deployment target.
 | `confluence.py` `jira.py` `gitlab.py` | Thin REST clients returning dataclasses. Branch on `self.cloud` where Cloud and Data Center APIs differ. |
 | `vault.py` | Obsidian notes: frontmatter, links, managed blocks. |
 | `ui.py` | Mockups: screenshots of the running app and HTML → PNG, via the installed Edge/Chrome run headless. |
-| `graph.py` | Domain layer — turns API facts into linked notes. |
+| `graph.py` | Domain layer — turns API facts into linked notes, including each sprint's "Done by". |
 | `ops.py` | Every operation, once. Both front ends call it; expected failures raise `OpError(code, msg)`. |
 | `mcp_server.py` | Tool definitions over `ops`. One-line bodies; logic belongs in `ops` or below. |
 | `cli.py` | The same operations from a terminal. `TOOLS` maps each MCP tool to its command. |
@@ -60,8 +60,10 @@ aspirational — it is the deployment target.
 
 ## Behaviour when using the tools
 
-- **Confirm before anything the team sees.** Creating an MR, creating a sprint,
-  moving issues, publishing to Confluence — show the content, then ask.
+- **Confirm before anything the team sees.** Creating a sprint, moving issues,
+  publishing to Confluence — show the content, then ask.
+- **GitLab is read-only.** DonnyT does not create or edit merge requests; it
+  reads merged work for history and, later, estimation. Don't add writes.
 - **Size sprints on `completed` work, never `committed`.** The distinction is
   the entire point of `jira_velocity`. The team may not estimate: issue counts
   are a first-class measure, and an unestimated issue is never dropped.
@@ -71,16 +73,23 @@ aspirational — it is the deployment target.
 - **Person notes are private.** Never publish 1:1 or person-note content to
   Confluence or GitLab. Report what the record shows; don't editorialise about
   someone's performance.
-- **Don't invent identifiers.** Issue keys, MR numbers, account ids and page ids
+- **Don't invent identifiers.** Issue keys, sprint ids, account ids and page ids
   either come from a tool call or get asked about.
-- **Fetch the Confluence template; never reconstruct it from memory.** If it
+- **Fetch the Confluence PRD template; never reconstruct it from memory.** If it
   can't be fetched, stop and say so.
 
 ## Testing
 
-No test suite yet. The stdlib pieces — `_html2md`, `vault` frontmatter and
-managed blocks — are pure functions and are the right place to start if you add
-one. Check changes against a live instance with:
+`tests/` is stdlib `unittest`, no network and no config file needed:
+
+```bash
+python -m unittest discover -s tests
+```
+
+It covers the pure pieces -- reading hand-written briefs and person notes
+(`vault.sections`, `parse_table`, frontmatter), `working_days`, Cloud rich
+text (`jira.adf_text`), and who-did-what attribution (`GraphBuilder._done_by`).
+Add to it when you touch those. Check changes against a live instance with:
 
 ```bash
 python -m donnyt.cli doctor
@@ -96,6 +105,11 @@ python -m donnyt.cli doctor
 - A sprint counts as estimated at `jira.ESTIMATED_SHARE` (80%) of issues with
   points; only those feed `average_completed_points`, which is `None` when
   there are none, never 0.
+- GitLab reports people by **username**, Jira by **display name**. Anything
+  written to the vault goes through `config.member_by` to the roster name
+  (`GraphBuilder._person`), or one person becomes two notes.
+- `GitLabClient.merged_between` filters on `merged_at` itself: the API can only
+  filter merged MRs by last update, which is at or after the merge.
 - Note frontmatter is a small YAML subset: no inline `# comments` (they become
   part of the value), and an empty key parses as `[]`.
 - `repo_root()` must not be derived from `__file__` alone; an installed copy

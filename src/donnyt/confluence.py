@@ -99,8 +99,8 @@ class ConfluenceClient:
             results = self.search(cql, limit=1)
         return self.get_page(str(results[0]["id"])) if results else None
 
-    def get_template(self, kind: str = "mr") -> Page:
-        """A configured template page (``mr`` or ``prd``) -- by id when set, otherwise by title."""
+    def get_template(self, kind: str = "prd") -> Page:
+        """A configured template page (``prd``) -- by id when set, otherwise by title."""
         page_id = getattr(self.config, f"{kind}_template_page_id")
         if page_id:
             return self.get_page(page_id)

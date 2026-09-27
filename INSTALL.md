@@ -21,9 +21,8 @@ There are two roles. Read the one you are doing.
 | --- | --- | --- | --- |
 | **Required** | **Python 3.11 or newer** | Config is read with `tomllib`, added in 3.11 | `python --version` |
 | **Required** | Network access to your **Jira/Confluence** hosts. Cloud or self-hosted Data Center both work | Reading sprints and templates | `curl -I https://jira.yourcompany.internal` |
-| **Required** | Network access to your **GitLab** host | Reading and creating MRs | `curl -I https://gitlab.internal.corp` |
+| **Required** | Network access to your **GitLab** host | Reading merged work and reviews (read-only) | `curl -I https://gitlab.internal.corp` |
 | **Required** | **Claude Code** | Runs the skills | `claude --version` |
-| Optional | **git** | Reading local branches for MR descriptions | `git --version` |
 | Optional | **Obsidian** | Viewing the knowledge graph. The vault is plain Markdown and works without it | — |
 | Optional | The **`mcp`** Python package, from the zip's bundle *or* an internal package mirror | Exposes the tools to Claude Code as MCP tools. **Without it everything still works** through the CLI | — |
 
@@ -45,7 +44,7 @@ them from a machine that can reach the relevant site.
 | --- | --- | --- |
 | **Atlassian Cloud:** API token (covers both Confluence and Jira) | `https://id.atlassian.com/manage-profile/security/api-tokens` → **Create API token** | Inherits your own permissions. You must be able to see the board and the template page. |
 | **Atlassian Data Center:** personal access token(s) | In Jira and in Confluence: avatar → **Profile** → **Personal Access Tokens** | Inherits your permissions. Jira and Confluence each issue their own. |
-| **GitLab personal access token** | `<your-gitlab>/-/user_settings/personal_access_tokens` | **`api`** and **`read_repository`** |
+| **GitLab personal access token** | `<your-gitlab>/-/user_settings/personal_access_tokens` | **`read_api`** and **`read_repository`** — DonnyT only reads |
 
 > Tokens are shown **once**. Copy them immediately.
 >
@@ -62,8 +61,7 @@ Collect these before step 5; each is visible in a URL.
 | `atlassian.site` | Address bar on any Jira page | `https://acme.atlassian.net` or `https://jira.corp.internal` |
 | `atlassian.confluence_url` | Data Center only, when Confluence has its own host or path | `https://wiki.corp.internal` |
 | `confluence.space` | Page URL: `/spaces/`**`ENG`**`/...`, or `spaceKey=ENG` | `ENG` |
-| `confluence.mr_template_page_id` | Cloud page URL: `/pages/`**`123456789`**`/MR+Template`. Data Center: **⋯ → Page Information**, the `pageId=` in the URL | `123456789` |
-| `confluence.prd_template_page_id` | Optional, for `/prd-write`. Found the same way as the MR template | `123456790` |
+| `confluence.prd_template_page_id` | Optional, for `/prd-write`. Cloud page URL: `/pages/`**`123456790`**`/PRD+Template`. Data Center: **⋯ → Page Information**, the `pageId=` in the URL | `123456790` |
 | `jira.project_key` | The prefix on any issue: **`TEAM`**`-1234` | `TEAM` |
 | `jira.board_id` | Board URL: `/boards/`**`42`** | `42` |
 | `gitlab.default_project` | The path after the host | `platform/backend/api` |
@@ -290,7 +288,6 @@ site = "https://acme.atlassian.net"     # or https://jira.corp.internal
 
 [confluence]
 space = "ENG"
-mr_template_page_id = "123456789"   # your MR template page
 prd_template_page_id = ""            # optional: your PRD template page, for /prd-write
 
 [jira]
@@ -313,15 +310,15 @@ confluence_url = "https://wiki.corp.internal"     # or https://corp.internal/con
 `deployment = "auto"` works out Cloud vs Data Center from the address. Set it
 to `"cloud"` or `"datacenter"` only if the doctor gets it wrong.
 
-Then list your team. This drives capacity planning and connects Jira and GitLab
-identities to the person notes in the vault:
+Then list your team. This connects Jira and GitLab identities to the person
+notes in the vault, and records who did what in each sprint:
 
 ```toml
 [[team.members]]
 name = "Maya Cohen"        # MUST match their Jira display name exactly
 jira = "5f8a1c2d3e4b5a6c"  # Cloud accountId, or Data Center username
-gitlab = "mcohen"
-capacity = 8               # story points per full sprint
+gitlab = "mcohen"          # their GitLab username: how merged work is credited
+# capacity = 8             # optional: story points per full sprint, only if the team estimates
 ```
 
 Find a Cloud `accountId` at `<site>/rest/api/3/user/search?query=their@email.com`.
@@ -357,7 +354,7 @@ Every check should pass:
 [ok]   mcp_package      usable (MCPServer)
 [ok]   config           config.toml parsed
 [ok]   atlassian        datacenter (auto-detected); jira https://jira.corp.internal; confluence https://wiki.corp.internal; auth personal access token
-[ok]   confluence       authenticated as You; MR template 'Merge Request Template' (id 123456789)
+[ok]   confluence       authenticated as You; PRD template 'PRD Template' (id 123456790)
 [ok]   jira             board 42 'TEAM board'; active sprint 'Sprint 14'; points field customfield_10002 (Story Points)
 [ok]   gitlab           authenticated as @you; project platform/backend/api
 [ok]   vault            1 notes at ...\vault
@@ -393,7 +390,7 @@ Then try:
 **Open folder as vault** → select `DonnyT/vault`.
 
 Graph view is `Ctrl/Cmd+G`. Nodes are coloured by type: people blue, sprints
-green, MRs orange, decisions purple.
+green, decisions purple.
 
 The vault is plain Markdown. Skipping Obsidian costs you the graph view and
 nothing else.
@@ -494,12 +491,12 @@ Either the wrong API flavour or a missing context path. Check the doctor's
 
 ### `HTTP 403` from GitLab
 
-The token lacks the `api` scope, or your account cannot see that project.
-Regenerate with both `api` and `read_repository`.
+The token lacks the `read_api` scope, or your account cannot see that project.
+Regenerate with both `read_api` and `read_repository`.
 
-### `HTTP 404` on the MR template
+### `HTTP 404` on the PRD template
 
-`confluence.mr_template_page_id` is wrong, or your account cannot see the page.
+`confluence.prd_template_page_id` is wrong, or your account cannot see the page.
 Open the page in a browser while signed in as the token's owner and re-copy the
 numeric id from the URL.
 

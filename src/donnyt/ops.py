@@ -53,10 +53,6 @@ def _template(kind: str, raw: bool) -> dict[str, Any]:
     }
 
 
-def mr_template(raw: bool = False) -> dict[str, Any]:
-    return _template("mr", raw)
-
-
 def prd_template(raw: bool = False) -> dict[str, Any]:
     try:
         result = _template("prd", raw)
@@ -221,20 +217,6 @@ def jira_assign(issue_keys: list[str], assignee: str) -> dict[str, Any]:
 # ------------------------------------------------------------------- gitlab
 
 
-def gitlab_branch_summary(repo_path: str, target_branch: str = "") -> dict[str, Any]:
-    from .gitlab import local_branch_summary
-
-    return local_branch_summary(repo_path, target_branch or load_config().gitlab_target_branch)
-
-
-def gitlab_compare(source: str, target: str = "", project: str = "") -> dict[str, Any]:
-    from .gitlab import GitLabClient
-
-    return GitLabClient().compare(
-        source, target or load_config().gitlab_target_branch, project or None
-    )
-
-
 def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30) -> list[dict[str, Any]]:
     from .gitlab import GitLabClient
 
@@ -242,54 +224,6 @@ def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30) ->
         mr.as_dict()
         for mr in GitLabClient().list_merge_requests(state=state, author=author or None, limit=limit)
     ]
-
-
-def gitlab_create_mr(
-    source_branch: str,
-    title: str,
-    description: str,
-    target_branch: str = "",
-    project: str = "",
-    draft: bool = True,
-    labels: list[str] | None = None,
-) -> dict[str, Any]:
-    from .gitlab import GitLabClient
-
-    return (
-        GitLabClient()
-        .create_merge_request(
-            source_branch=source_branch,
-            title=title,
-            description=description,
-            target_branch=target_branch or None,
-            project=project or None,
-            draft=draft,
-            labels=labels,
-        )
-        .as_dict()
-    )
-
-
-def gitlab_update_mr(
-    iid: int,
-    description: str = "",
-    title: str = "",
-    project: str = "",
-    labels: list[str] | None = None,
-) -> dict[str, Any]:
-    from .gitlab import GitLabClient
-
-    return (
-        GitLabClient()
-        .update_merge_request(
-            iid,
-            project=project or None,
-            title=title or None,
-            description=description or None,
-            labels=labels,
-        )
-        .as_dict()
-    )
 
 
 # -------------------------------------------------------------------- vault
@@ -364,10 +298,10 @@ def vault_record_decision(
     }
 
 
-def vault_sync(sprints_back: int = 3, include_mrs: bool = True) -> dict[str, Any]:
+def vault_sync(sprints_back: int = 3) -> dict[str, Any]:
     from .graph import GraphBuilder
 
-    return GraphBuilder().sync_all(sprints_back, include_mrs)
+    return GraphBuilder().sync_all(sprints_back)
 
 
 def vault_sprint_brief(title: str) -> dict[str, Any]:
@@ -399,29 +333,16 @@ def vault_sync_sprint(sprint_id: int = 0, plan: str = "") -> dict[str, Any]:
     if not sprint:
         raise OpError("not_found", f"No sprint {sprint_id or '(active)'}.")
     issues = jira.sprint_issues(sprint.id)
-    title = builder.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint), plan)
-    return {"note": title, "sprint": sprint.as_dict(), "issues": len(issues)}
-
-
-def vault_sync_mr(iid: int, project: str = "", summary: str = "") -> dict[str, Any]:
-    from .gitlab import GitLabClient
-    from .graph import GraphBuilder, extract_issue_key
-    from .jira import JiraClient
-
-    builder = GraphBuilder()
-    target = project or builder.config.gitlab_default_project
-    mr = GitLabClient(builder.config).get_merge_request(iid, target)
-
-    key = extract_issue_key(mr.source_branch, mr.title)
-    issue = None
-    if key:
-        try:
-            issue = JiraClient(builder.config).get_issue(key)
-        except Exception:  # a branch may name an issue that no longer exists
-            issue = None
-
-    title = builder.sync_merge_request(mr, target, issue, summary=summary)
-    return {"note": title, "mr": mr.as_dict(), "issue": key or None}
+    merged = builder.merged_work(sprint)
+    title = builder.sync_sprint(
+        sprint, issues, jira.workload(sprint.id), jira.done_in(sprint), plan, merged
+    )
+    return {
+        "note": title,
+        "sprint": sprint.as_dict(),
+        "issues": len(issues),
+        "merged_mrs": None if merged is None else len(merged),
+    }
 
 
 # ----------------------------------------------------------------------- ui

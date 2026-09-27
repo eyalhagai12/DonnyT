@@ -62,7 +62,7 @@ network.
 
 **Run:**
 ```
-python -m donnyt.cli template --raw
+python -m donnyt.cli prd-template --raw
 ```
 
 **Expect:** a block of XHTML starting with something like
@@ -72,8 +72,8 @@ prefix is Confluence's own macro namespace (`ac:structured-macro`,
 expected; do not try to "clean" this output, it is the ground truth.
 
 **If this fails:**
-- `error: not_found` or a 404 — `confluence.mr_template_page_id` in
-  `config.toml` is wrong, or `confluence.mr_template_title` doesn't match the
+- `error: not_found` or a 404 — `confluence.prd_template_page_id` in
+  `config.toml` is wrong, or `confluence.prd_template_title` doesn't match the
   page's title exactly. Open the template page in your browser, copy the
   numeric id from the URL (`/pages/`**`123456789`**`/...`), and put that
   exact number in `config.toml`.
@@ -91,7 +91,7 @@ committed anywhere) — you'll compare against it in Step 2.
 
 **Run:**
 ```
-python -m donnyt.cli template
+python -m donnyt.cli prd-template
 ```
 
 **Expect:** readable Markdown — `##` headings, `-` bullets, tables using `|`,
@@ -173,7 +173,7 @@ cause — this converter doesn't support merged cells. Either:
 - ask whoever owns the template to simplify that table (best long-term fix),
   or
 - treat that one table as a known gap and describe it in words instead when
-  `/mr-write` fills that section.
+  `/prd-write` fills that section.
 
 ### 3c. A checklist item's checked/unchecked state is wrong
 
@@ -245,15 +245,15 @@ in `config.toml`.
 
 **Run:**
 ```
-python -m donnyt.cli mrs --state opened --limit 5
+python -m donnyt.cli mrs --state merged --limit 5
 ```
 
-**Expect:** a list (possibly empty, if nothing's currently open) with no
-error.
+**Expect:** the last few merged MRs (possibly an empty list), with no error.
+DonnyT only reads GitLab: this is where each sprint's "Done by" comes from.
 
 **If this fails:** `doctor`'s `gitlab` line names the problem — usually
 `gitlab.default_project` in `config.toml` not matching the exact
-`group/subgroup/repo` path, or the token missing the `api` scope.
+`group/subgroup/repo` path, or the token missing the `read_api` scope.
 
 ---
 
@@ -265,9 +265,11 @@ python -m donnyt.cli sync --sprints-back 2
 python -m donnyt.cli vault-stats
 ```
 
-**Expect:** `sync` reports sprints and merge requests written; `vault-stats`
-shows non-zero counts under `by_type` — at least `sprint`, likely `person` and
-`mr`.
+**Expect:** `sync` reports sprints written; `vault-stats` shows non-zero
+counts under `by_type` — at least `sprint`, and `person`. Open a sprint note:
+its **Done by** section lists, per person, what they finished in Jira and what
+they merged and reviewed in GitLab. If a person appears twice under different
+names, their `gitlab` username in `[[team.members]]` is missing or wrong.
 
 Then, open `vault/` in Obsidian (**Open folder as vault**) and look at the
 graph view (`Ctrl/Cmd+G`). You should see colored nodes — sprints in green,
@@ -277,31 +279,34 @@ output of the `sync` command for help.
 
 ---
 
-## Step 7 — Dry-run the MR skill against a real branch
+## Step 7 — Dry-run sprint planning from a brief
 
 Only do this once Steps 1–6 all pass.
 
-Pick a real feature branch with a few commits — ideally one not yet opened as
-an MR, so nothing gets created by accident.
+Copy `vault/_templates/Sprint.md` to `vault/Sprints/<next sprint name>.md` and
+fill it in — dates, vectors, who is away, who is on call. Then check the
+brief reads the way you wrote it:
 
-In Claude Code, ask:
+```
+python -m donnyt.cli sprint-brief "<next sprint name>"
+```
 
-> Draft the MR description for branch `<branch-name>` in `<repo-path>`, using
-> `/mr-write`. Show me the finished description but do NOT create the MR —
-> stop before that step.
+**Expect:** your dates and `working_days`, your vectors, availability and
+on-call rows, each person's Focus from their note, and `missing` empty (or
+naming exactly what you left out).
 
-The skill is already written to stop and show you the description before
-creating anything — this instruction is a belt-and-suspenders reminder, not a
-workaround.
+Then, in Claude Code:
 
-**Check the output against your template's actual sections one more time** —
-same as Step 2, but now checking that the *filled-in* content (not just the
-empty template) landed in the right places, pulled real commit/diff
-information, and didn't invent anything (no fabricated ticket numbers,
-no fabricated reviewer names).
+> Plan the sprint from the brief `<next sprint name>` with `/sprint-plan`.
+> Show me the proposal but do NOT create anything in Jira.
 
-Once that reads correctly, the setup is done. Everyday use from here is just
-`/mr-write`, `/prd-write`, `/sprint-plan`, and `/vault-sync` — see `README.md`.
+The skill already stops for approval before touching Jira — this is a
+belt-and-suspenders reminder. **Check the proposal**: every issue tied to a
+vector, availability matching your brief, Focus conflicts listed, nothing
+invented (no issue keys that are not in your backlog).
+
+Once that reads correctly, the setup is done. Everyday use from here is
+`/sprint-plan`, `/vault-sync`, `/prd-write` and `/ui-mock` — see `README.md`.
 
 ---
 

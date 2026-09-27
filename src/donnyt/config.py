@@ -216,14 +216,6 @@ class Config:
         return str(self._get("confluence.space", default=""))
 
     @property
-    def mr_template_page_id(self) -> str:
-        return str(self._get("confluence.mr_template_page_id", default="") or "")
-
-    @property
-    def mr_template_title(self) -> str:
-        return str(self._get("confluence.mr_template_title", default="Merge Request Template"))
-
-    @property
     def prd_template_page_id(self) -> str:
         return str(self._get("confluence.prd_template_page_id", default="") or "")
 
@@ -277,7 +269,7 @@ class Config:
         token = os.environ.get("GITLAB_TOKEN", "").strip()
         if not token:
             raise ConfigError(
-                "GITLAB_TOKEN must be set in .env (scopes: api, read_repository).\n"
+                "GITLAB_TOKEN must be set in .env (scopes: read_api, read_repository).\n"
                 "See INSTALL.md step 4."
             )
         return token
@@ -285,10 +277,6 @@ class Config:
     @property
     def gitlab_default_project(self) -> str:
         return str(self._get("gitlab.default_project", default="") or "")
-
-    @property
-    def gitlab_target_branch(self) -> str:
-        return str(self._get("gitlab.default_target_branch", default="main"))
 
     # -- vault -------------------------------------------------------------
     @property

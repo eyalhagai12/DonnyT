@@ -131,7 +131,7 @@ overwriting a PRD someone else wrote.
 Call `vault_write_note` with `kind: "project"`, the PRD title, a short summary
 (the problem, the proposed solution, the Must requirements and the Confluence
 URL), and `links_to` for any decision notes you cited. Once tickets exist, the
-sprint and MR notes that deliver them can link back to it.
+sprint notes that deliver them can link back to it.
 
 ## Notes
 

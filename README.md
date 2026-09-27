@@ -2,13 +2,17 @@
 
 A team-lead toolkit for Claude Code. Three jobs:
 
-1. **Write merge requests** that follow the team's Confluence template, instead
-   of a shape reinvented every time.
-2. **Plan sprints** from a brief you write in the vault — goals, dates, who is
+1. **Plan sprints** from a brief you write in the vault — goals, dates, who is
    away, who is on call — sized against what the team has actually finished,
    with or without story points.
+2. **Record who did what.** Each sprint note lists, per person, the tickets
+   they finished and the merge requests they merged and reviewed — read from
+   Jira and GitLab, worth showing the team.
 3. **Remember all of it** in an Obsidian knowledge graph, so last quarter stays
    answerable.
+
+GitLab is read-only: history now, and the raw material for estimating new work
+from what similar work touched.
 
 Built to run on an **airtight internal network** — no package index, no public
 internet. See **[INSTALL.md](INSTALL.md)**.
@@ -33,35 +37,32 @@ python -m donnyt.cli doctor
 Full walkthrough, credentials and troubleshooting: **[INSTALL.md](INSTALL.md)**.
 
 Setting this up *on* the isolated network, with a weaker model doing the work
-and your Confluence template never leaving that network:
+and your Confluence templates never leaving that network:
 **[INTERNAL_SETUP.md](INTERNAL_SETUP.md)**.
 
 ---
 
 ## Using it
 
-Three skills, invoked in Claude Code:
+Four skills, invoked in Claude Code:
 
 | Skill | What it does |
 | --- | --- |
-| `/mr-write` | Fetches the Confluence MR template, reads the actual diff, fills every section, opens the MR as a draft, records it in the vault. |
 | `/prd-write` | Turns a problem statement and a proposed solution into a PRD from the Confluence template: user flows, screens, edge cases and ticket-sized requirements. Asks about gaps instead of inventing them, publishes a draft. Runs before tickets exist; it never creates them. |
 | `/ui-mock` | Mockups in the style of your own system: learns the look from screenshots or by capturing the running app, draws each screen as HTML, renders it to PNG with the installed Edge/Chrome. `/prd-write` uses it for the Mockups section. |
-| `/sprint-plan` | Reads your sprint brief (`vault/Sprints/<name>.md`), then selects by goal, sizes by availability, assigns by each person's Focus. Works with unestimated issues. Presents the plan for review, then creates the sprint in Jira. |
-| `/vault-sync` | Keeps the graph current; answers questions about team history; preps 1:1s. |
+| `/sprint-plan` | Reads your sprint brief (`vault/Sprints/<name>.md`), then selects by goal, sizes by availability, assigns by each person's Focus. Works with unestimated issues. Presents the plan for review, then creates the sprint in Jira. || `/vault-sync` | Keeps the graph current; answers questions about team history; preps 1:1s. |
 
-They also trigger on plain language — "write the MR for this branch", "what
+They also trigger on plain language — "plan the sprint from the brief", "what
 should go in the next sprint", "what has Maya been working on".
 
 Everything also works from the terminal:
 
 ```bash
-python -m donnyt.cli template          # the MR template, as Markdown
 python -m donnyt.cli sprint-brief "Sprint 7"   # read a sprint brief
 python -m donnyt.cli velocity          # completed issues and points per recent sprint
 python -m donnyt.cli workload          # per-person load this sprint
 python -m donnyt.cli backlog           # ranked candidates for next sprint
-python -m donnyt.cli sync              # refresh the vault from Jira + GitLab
+python -m donnyt.cli sync-sprint       # the sprint note, with who did what
 python -m donnyt.cli vault-links "Maya Cohen"
 ```
 
@@ -74,18 +75,18 @@ src/donnyt/
   _http.py        stdlib HTTP: basic auth, corporate CA bundles, proxies
   _html2md.py     Confluence storage format <-> Markdown
   config.py       .env + config.toml
-  confluence.py   pages, CQL search, the MR template (Cloud + Data Center)
+  confluence.py   pages, CQL search, the PRD template (Cloud + Data Center)
   jira.py         issues, boards, sprints, velocity, workload (Cloud + Data Center)
-  gitlab.py       merge requests, branch and ref comparison
+  gitlab.py       read-only: merged work and its reviewers
   vault.py        Obsidian notes, frontmatter, links, managed blocks
   graph.py        turns Jira/GitLab facts into linked notes
   ops.py          every operation, once -- both front ends call it
   ui.py           mockups: capture the running app, render HTML to PNG
-  mcp_server.py   33 MCP tools over ops.py
-  cli.py          the same 33, from a terminal (`donnyt tools` maps them)
+  mcp_server.py   MCP tools over ops.py
+  cli.py          the same tools, from a terminal (`donnyt tools` maps them)
   doctor.py       preflight checks
 
-.claude/skills/   mr-write, prd-write, ui-mock, sprint-plan, vault-sync
+.claude/skills/   sprint-plan, vault-sync, prd-write, ui-mock
 vault/            the knowledge graph (plain Markdown)
 vendor/wheels/    offline install bundle
 ```
@@ -111,15 +112,14 @@ install needs no build backend.
 | Folder | Type | Holds |
 | --- | --- | --- |
 | `People/` | `person` | One per team member. Focus, 1:1s, growth, context. |
-| `Sprints/` | `sprint` | Starts as your brief; Jira goal, workload, issues and plan are added below it. |
-| `MRs/` | `mr` | Merge requests worth remembering. |
+| `Sprints/` | `sprint` | Starts as your brief; Jira goal, workload, issues, plan and **Done by** are added below it. |
 | `Projects/` | `epic` | Arcs spanning sprints. |
 | `Decisions/` | `decision` | Context, decision, consequences. |
 | `Meetings/` | `meeting` | Retros, planning, skip-levels. |
 | `Topics/` | `topic` | Everything else. |
 
 Edges are `[[wikilinks]]`. **A person's history is their backlinks** — every
-sprint, MR and decision that named them shows up on their page automatically,
+sprint and decision that named them shows up on their page automatically,
 with nothing appended to it.
 
 ### Your writing is safe
@@ -140,9 +140,9 @@ marked block — write above or below it.
 
 ## Safety
 
-- **Nothing is published without asking.** Opening an MR, creating a sprint and
-  publishing to Confluence are all visible to the team; the skills confirm
-  first.
+- **Nothing is published without asking.** Creating a sprint, moving issues
+  and publishing to Confluence are all visible to the team; the skills confirm
+  first. GitLab is only ever read.
 - **Sprints are sized on completed work, never committed.** Issue counts when
   the team doesn't estimate, points once it does.
 - **Goals come before people's focus.** The brief's vectors decide what goes

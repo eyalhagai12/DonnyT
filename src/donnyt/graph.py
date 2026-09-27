@@ -1,9 +1,9 @@
 """Build the knowledge graph: turn Jira and GitLab facts into linked notes.
 
 Each builder writes one note and, crucially, the edges around it -- a sprint
-note links every person who carried work in it, a merge request note links its
-author and its Jira issue. That reciprocity is what makes Obsidian's graph view
-show the team rather than a pile of files.
+note links every person who carried work in it, and records what each of them
+finished, merged and reviewed. That reciprocity is what makes Obsidian's graph
+view show the team rather than a pile of files.
 """
 
 from __future__ import annotations
@@ -17,16 +17,8 @@ from .gitlab import GitLabClient, MergeRequest
 from .jira import Issue, JiraClient, Sprint
 from .vault import Vault, bullets, link, parse_table, section, sections, slug, unlink
 
-# A Jira key embedded in a branch name or MR title, e.g. TEAM-1234.
+# A Jira key in free text, e.g. TEAM-1234.
 ISSUE_KEY = re.compile(r"\b([A-Z][A-Z0-9_]+-\d+)\b")
-
-
-def extract_issue_key(*texts: str) -> str:
-    for text in texts:
-        match = ISSUE_KEY.search(text or "")
-        if match:
-            return match.group(1)
-    return ""
 
 
 def _size(issues: list[Issue]) -> str:
@@ -93,6 +85,7 @@ class GraphBuilder:
         workload: dict[str, Any],
         done: list[Issue],
         plan: str = "",
+        merged: list[tuple[MergeRequest, list[str]]] | None = None,
     ) -> str:
         """Write the note for one sprint and touch every person it involved.
 
@@ -100,7 +93,9 @@ class GraphBuilder:
         that name exists, the Jira facts land below it and the brief itself,
         being outside the managed blocks, is kept. ``plan`` is the planning
         reasoning; it is written only when given, and a later sync without it
-        leaves the last one in place.
+        leaves the last one in place. ``merged`` is the sprint's merged MRs with
+        their approvers, from :meth:`merged_work`; with it, the note gets a
+        "Done by" section: what each person finished, merged and reviewed.
 
         ``done`` comes from ``JiraClient.done_in``: today's status alone would
         count spill-over as finished in every sprint it passed through.
@@ -140,6 +135,7 @@ class GraphBuilder:
         }
         if plan.strip():
             blocks["plan"] = f"## Plan\n\n{plan.strip()}"
+        blocks["done-by"] = "## Done by\n\n" + self._done_by(done, merged)
 
         self.vault.upsert(
             title=title,
@@ -168,6 +164,57 @@ class GraphBuilder:
             self._touch_person(person, sprint_title=title)
 
         return title
+
+    def _person(self, handle: str) -> str:
+        """A roster name for a Jira name or GitLab username, so one person is one note."""
+        member = self.config.member_by(handle)
+        return member.name if member else handle
+
+    def _done_by(self, done: list[Issue], merged: list[tuple[MergeRequest, list[str]]] | None) -> str:
+        """What each person finished, merged and reviewed -- the record to show them.
+
+        Finished issues come from Jira (the assignee), merged and reviewed work
+        from GitLab (the author, and every approver who is not the author).
+        """
+        work: dict[str, list[str]] = {}
+        for issue in done:
+            if issue.assignee:
+                work.setdefault(self._person(issue.assignee), []).append(
+                    f"Finished [{issue.key}]({issue.url}) {issue.summary}")
+        for mr, approvers in merged or []:
+            author = self._person(mr.author)
+            work.setdefault(author, []).append(f"Merged [!{mr.iid}]({mr.url}) {mr.title}")
+            for login in approvers:
+                reviewer = self._person(login)
+                if reviewer != author:
+                    work.setdefault(reviewer, []).append(
+                        f"Reviewed [!{mr.iid}]({mr.url}) {mr.title} — for {author}")
+        if not work:
+            return "_Nothing finished yet._"
+
+        roster = [m.name for m in self.config.members]
+        order = sorted(work, key=lambda n: (roster.index(n) if n in roster else len(roster), n))
+        rank = {"Finished": 0, "Merged": 1, "Reviewed": 2}
+        sections = []
+        for name in order:
+            lines = "\n".join(
+                f"- {line}" for line in sorted(work[name], key=lambda line: rank[line.split()[0]])
+            )
+            sections.append(f"### {link(name)}\n\n{lines}")
+        note = "" if merged is not None else "\n\n_GitLab was not read, so merged and reviewed work is missing._"
+        return "\n\n".join(sections) + note
+
+    def merged_work(self, sprint: Sprint) -> list[tuple[MergeRequest, list[str]]] | None:
+        """MRs merged during the sprint, each with its approvers. None when GitLab
+        is not configured or not reachable: the sprint note is still worth writing."""
+        if not (self.config.gitlab_default_project and sprint.start):
+            return None
+        try:
+            gitlab = GitLabClient(self.config)
+            merged = gitlab.merged_between(sprint.start, sprint.end or "9999-12-31")
+            return [(mr, gitlab.approvers(mr.iid)) for mr in merged]
+        except Exception:
+            return None
 
     def sprint_brief(self, title: str, jira: JiraClient | None = None) -> dict[str, Any]:
         """Read a hand-written sprint brief into what planning needs.
@@ -235,6 +282,11 @@ class GraphBuilder:
         missing = [name for name, value in (("start", start), ("end", end)) if not value]
         if not listed("vectors"):
             missing.append("vectors")
+        # What a day on call costs, as a share of a working day (1 = the whole day).
+        cost = note.frontmatter.get("on_call_cost")
+        on_call_cost = float(cost) if isinstance(cost, (int, float)) else None
+        if on_call and on_call_cost is None:
+            missing.append("on_call_cost")
 
         result: dict[str, Any] = {
             "title": note.title,
@@ -247,6 +299,7 @@ class GraphBuilder:
             "vectors": listed("vectors"),
             "availability": availability,
             "on_call": on_call,
+            "on_call_cost": on_call_cost,
             "must_include": keys("must include"),
             "keep_out": keys("keep out"),
             "notes": section(body, "notes"),
@@ -260,58 +313,6 @@ class GraphBuilder:
         if jira_error:
             result["jira_error"] = jira_error
         return result
-
-    # -- merge requests ----------------------------------------------------
-    def sync_merge_request(
-        self,
-        mr: MergeRequest,
-        project: str,
-        issue: Issue | None = None,
-        sprint_name: str = "",
-        summary: str = "",
-    ) -> str:
-        title = f"MR {mr.iid} — {mr.title.removeprefix('Draft:').strip()}"[:120]
-
-        facts = [
-            f"- **Project** — [{project}]({self.config.gitlab_url}/{project})",
-            f"- **Branch** — `{mr.source_branch}` → `{mr.target_branch}`",
-            f"- **State** — {'draft' if mr.draft else mr.state}",
-            f"- **Author** — {link(mr.author) if mr.author else '—'}",
-            f"- **Link** — [{mr.url}]({mr.url})",
-        ]
-        if issue:
-            facts.append(f"- **Issue** — [{issue.key}]({issue.url}) · {issue.summary}")
-        if sprint_name:
-            facts.append(f"- **Sprint** — {link(sprint_name)}")
-
-        frontmatter = {
-            "type": "mr",
-            "mr_iid": mr.iid,
-            "project": project,
-            "state": "draft" if mr.draft else mr.state,
-            "source_branch": mr.source_branch,
-            "target_branch": mr.target_branch,
-            "url": mr.url,
-            "tags": ["mr"],
-        }
-        if mr.author:
-            frontmatter["author"] = f"[[{slug(mr.author)}]]"
-        if issue:
-            frontmatter["issue"] = issue.key
-        if sprint_name:
-            frontmatter["sprint"] = f"[[{slug(sprint_name)}]]"
-
-        self.vault.upsert(
-            title=title,
-            kind="mr",
-            frontmatter=frontmatter,
-            intro=summary,
-            blocks={"facts": f"## Facts\n\n" + "\n".join(facts)},
-        )
-
-        if mr.author:
-            self._touch_person(mr.author, mr_title=title)
-        return title
 
     # -- decisions ---------------------------------------------------------
     def record_decision(
@@ -356,7 +357,6 @@ class GraphBuilder:
         self,
         name: str,
         sprint_title: str = "",
-        mr_title: str = "",
         decision_title: str = "",
     ) -> None:
         """Ensure a person note exists. Their history comes from backlinks, so
@@ -364,14 +364,14 @@ class GraphBuilder:
         member = self.config.member_by(name)
         frontmatter: dict[str, Any] = {"type": "person", "tags": ["person"]}
         if member:
-            frontmatter.update(
-                {"jira": member.jira, "gitlab": member.gitlab, "capacity": member.capacity}
-            )
+            frontmatter.update({"jira": member.jira, "gitlab": member.gitlab})
+            if member.capacity:
+                frontmatter["capacity"] = member.capacity
 
         existing = self.vault.read(name)
         intro = "" if existing else (
             "One-on-ones, growth notes and context live here. "
-            "Sprints, merge requests and decisions link back automatically — "
+            "Sprints and decisions link back automatically — "
             "check the backlinks pane for their history.\n\n"
             "## Focus\n\n"
             "%% What you want them working on and steered toward. Sprint "
@@ -387,10 +387,10 @@ class GraphBuilder:
         )
 
     # -- full refresh ------------------------------------------------------
-    def sync_all(self, sprints_back: int = 3, include_mrs: bool = True) -> dict[str, Any]:
-        """Pull recent sprints and open MRs into the vault in one pass."""
+    def sync_all(self, sprints_back: int = 3) -> dict[str, Any]:
+        """Pull the active sprint and recent closed ones into the vault in one pass."""
         jira = JiraClient(self.config)
-        written: dict[str, list[str]] = {"sprints": [], "merge_requests": [], "people": []}
+        written: dict[str, list[str]] = {"sprints": [], "people": []}
 
         candidates = []
         active = jira.active_sprint()
@@ -404,21 +404,11 @@ class GraphBuilder:
         for sprint in candidates:
             issues = jira.sprint_issues(sprint.id)
             written["sprints"].append(
-                self.sync_sprint(sprint, issues, jira.workload(sprint.id), jira.done_in(sprint))
+                self.sync_sprint(
+                    sprint, issues, jira.workload(sprint.id), jira.done_in(sprint),
+                    merged=self.merged_work(sprint),
+                )
             )
-
-        if include_mrs and self.config.gitlab_default_project:
-            gitlab = GitLabClient(self.config)
-            project = self.config.gitlab_default_project
-            for mr in gitlab.list_merge_requests(state="opened", limit=30):
-                key = extract_issue_key(mr.source_branch, mr.title)
-                issue = None
-                if key:
-                    try:
-                        issue = jira.get_issue(key)
-                    except Exception:  # a branch may name an issue that no longer exists
-                        issue = None
-                written["merge_requests"].append(self.sync_merge_request(mr, project, issue))
 
         written["people"] = [n.title for n in self.vault.notes("person")]
         return {"written": written, "stats": self.vault.stats()}

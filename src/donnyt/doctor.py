@@ -149,18 +149,6 @@ def _probe_confluence(config: Any) -> dict[str, Any]:
         me = client.http.get("/rest/api/user/current")
         detail = f"authenticated as {me.get('displayName') or me.get('email') or 'unknown'}"
 
-        template_id = config.mr_template_page_id
-        try:
-            page = client.get_template()
-            detail += f"; MR template '{page.title}' (id {page.id})"
-        except Exception as exc:
-            return _check(
-                "confluence",
-                FAIL,
-                f"{detail}; template lookup failed: {exc}",
-                "Set confluence.mr_template_page_id in config.toml to the numeric page id "
-                f"{'' if template_id else 'of your MR template page'} (INSTALL.md step 5).",
-            )
         # The PRD template is optional: report it, never fail on it.
         try:
             prd = client.get_template("prd")
@@ -237,6 +225,15 @@ def _probe_jira(config: Any) -> dict[str, Any]:
     except ConfigError as exc:
         return _check("jira", FAIL, str(exc))
     except Exception as exc:
+        if "HTTP 403" in str(exc) and _jira_software_unlicensed(config):
+            return _check(
+                "jira",
+                FAIL,
+                str(exc),
+                "Jira Software's licence is invalid or expired: sign-in still works, but every "
+                "board and sprint call is refused. An admin renews it under Administration -> "
+                "Applications -> Versions & licenses.",
+            )
         return _check(
             "jira",
             FAIL,
@@ -245,6 +242,26 @@ def _probe_jira(config: Any) -> dict[str, Any]:
             "the credentials in .env. A 404 on /rest/api/3 means this is Data Center: set "
             "atlassian.deployment = \"datacenter\".",
         )
+
+
+def _jira_software_unlicensed(config: Any) -> bool:
+    """True when Data Center says Jira Software's licence is not valid.
+
+    An expired licence looks like a permissions problem (HTTP 403 on the agile
+    API) while basic sign-in keeps working, which sends people hunting in the
+    wrong place. Unknown -- no such endpoint, e.g. on Cloud -- is False.
+    """
+    try:
+        from .jira import JiraClient
+
+        # The plugin API answers 406 to a plain application/json Accept.
+        data = JiraClient(config).http.get(
+            "/rest/plugins/applications/1.0/installed/jira-software/license",
+            headers={"Accept": "application/vnd.atl.plugins+json, application/json"},
+        )
+        return isinstance(data, dict) and data.get("valid") is False
+    except Exception:
+        return False
 
 
 def _probe_gitlab(config: Any) -> dict[str, Any]:

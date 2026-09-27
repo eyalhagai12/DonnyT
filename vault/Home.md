@@ -6,15 +6,16 @@ tags:
 
 # Home
 
-The team knowledge graph. Sprints, merge requests, decisions and people, linked
+The team knowledge graph. Sprints, decisions and people, linked
 so that last quarter stays answerable.
 
 ## Start here
 
 - **Graph view** (`Ctrl/Cmd+G`) — the whole team as a picture. Nodes are
-  coloured by type: people blue, sprints green, MRs orange, decisions purple.
+  coloured by type: people blue, sprints green, decisions purple.
 - **A person's history** — open their note and read the **backlinks** pane.
-  Every sprint, MR and decision that named them shows up there automatically.
+  Every sprint and decision that named them shows up there automatically.
+  What they finished, merged and reviewed is in each sprint's **Done by**.
 - **Why something happened** — search `Decisions/`.
 
 ## Folders
@@ -23,7 +24,6 @@ so that last quarter stays answerable.
 | ------------ | ------------------------------------------------ |
 | `People/`    | One note per team member. Focus, 1:1s, growth, context. |
 | `Sprints/`   | One per sprint. Write the brief from `_templates/Sprint.md`; the rest is added from Jira. |
-| `MRs/`       | Merge requests worth remembering.                |
 | `Projects/`  | Longer arcs that span sprints.                   |
 | `Decisions/` | Context, decision, consequences.                 |
 | `Meetings/`  | Retros, planning, skip-levels.                   |
