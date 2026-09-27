@@ -1,0 +1,160 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Omer Shapiro <omer@devstack.local>
+Date: Tue, 1 Sep 2026 11:00:00 +0300
+Subject: [PATCH 04/10] TEAM-5 Validate input and return JSON errors
+
+---
+ internal/todo/handler.go      | 16 +++++-----
+ internal/todo/respond.go      | 60 +++++++++++++++++++++++++++++++++++
+ internal/todo/respond_test.go | 34 ++++++++++++++++++++
+ 3 files changed, 102 insertions(+), 8 deletions(-)
+ create mode 100644 internal/todo/respond.go
+ create mode 100644 internal/todo/respond_test.go
+
+diff --git a/internal/todo/handler.go b/internal/todo/handler.go
+index d6b73bf..b50dba2 100644
+--- a/internal/todo/handler.go
++++ b/internal/todo/handler.go
+@@ -1,7 +1,6 @@
+ package todo
+ 
+ import (
+-	"encoding/json"
+ 	"net/http"
+ )
+ 
+@@ -22,8 +21,7 @@ func (h *Handler) Register(mux *http.ServeMux) {
+ }
+ 
+ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
+-	w.Header().Set("Content-Type", "application/json")
+-	json.NewEncoder(w).Encode(h.store.List())
++	writeJSON(w, http.StatusOK, h.store.List())
+ }
+ 
+ type createRequest struct {
+@@ -32,11 +30,13 @@ type createRequest struct {
+ 
+ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
+ 	var req createRequest
+-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+-		http.Error(w, "invalid JSON", http.StatusBadRequest)
++	if !decode(w, r, &req) {
+ 		return
+ 	}
+-	w.Header().Set("Content-Type", "application/json")
+-	w.WriteHeader(http.StatusCreated)
+-	json.NewEncoder(w).Encode(h.store.Create(req.Title))
++	title, err := validTitle(req.Title)
++	if err != nil {
++		writeError(w, http.StatusBadRequest, err.Error())
++		return
++	}
++	writeJSON(w, http.StatusCreated, h.store.Create(title))
+ }
+diff --git a/internal/todo/respond.go b/internal/todo/respond.go
+new file mode 100644
+index 0000000..2bb65e8
+--- /dev/null
++++ b/internal/todo/respond.go
+@@ -0,0 +1,60 @@
++package todo
++
++import (
++	"encoding/json"
++	"errors"
++	"fmt"
++	"net/http"
++	"strings"
++	"unicode/utf8"
++)
++
++// maxTitle is the longest title accepted, in characters.
++const maxTitle = 200
++
++// maxBody caps request bodies; a todo is a few hundred bytes at most.
++const maxBody = 1 << 16
++
++// errorBody is what every failed request returns.
++type errorBody struct {
++	Error string `json:"error"`
++}
++
++func writeJSON(w http.ResponseWriter, status int, v any) {
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(status)
++	json.NewEncoder(w).Encode(v)
++}
++
++func writeError(w http.ResponseWriter, status int, msg string) {
++	writeJSON(w, status, errorBody{Error: msg})
++}
++
++// decode reads a JSON body into v. On failure it writes a 400 and returns
++// false, so a handler can simply return.
++func decode(w http.ResponseWriter, r *http.Request, v any) bool {
++	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBody))
++	dec.DisallowUnknownFields()
++	if err := dec.Decode(v); err != nil {
++		var tooBig *http.MaxBytesError
++		if errors.As(err, &tooBig) {
++			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
++		} else {
++			writeError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
++		}
++		return false
++	}
++	return true
++}
++
++// validTitle trims a title and checks it is present and not too long.
++func validTitle(title string) (string, error) {
++	title = strings.TrimSpace(title)
++	if title == "" {
++		return "", errors.New("title is required")
++	}
++	if n := utf8.RuneCountInString(title); n > maxTitle {
++		return "", fmt.Errorf("title is %d characters; the limit is %d", n, maxTitle)
++	}
++	return title, nil
++}
+diff --git a/internal/todo/respond_test.go b/internal/todo/respond_test.go
+new file mode 100644
+index 0000000..0db9e19
+--- /dev/null
++++ b/internal/todo/respond_test.go
+@@ -0,0 +1,34 @@
++package todo
++
++import (
++	"strings"
++	"testing"
++)
++
++func TestValidTitle(t *testing.T) {
++	tests := []struct {
++		name    string
++		in      string
++		want    string
++		wantErr bool
++	}{
++		{"plain", "buy milk", "buy milk", false},
++		{"trimmed", "  buy milk \n", "buy milk", false},
++		{"empty", "", "", true},
++		{"only spaces", "   ", "", true},
++		{"at the limit", strings.Repeat("a", maxTitle), strings.Repeat("a", maxTitle), false},
++		{"over the limit", strings.Repeat("a", maxTitle+1), "", true},
++		{"counts characters, not bytes", strings.Repeat("ש", maxTitle), strings.Repeat("ש", maxTitle), false},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			got, err := validTitle(tt.in)
++			if (err != nil) != tt.wantErr {
++				t.Fatalf("err = %v; wantErr %v", err, tt.wantErr)
++			}
++			if got != tt.want {
++				t.Errorf("got %q; want %q", got, tt.want)
++			}
++		})
++	}
++}

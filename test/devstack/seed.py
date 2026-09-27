@@ -1,12 +1,18 @@
 """Seed the local devstack with the data DonnyT needs to be tested against.
 
+The world is a small team building a todo API in Go (``test/devstack/todo``):
+three closed sprints that built v0, a backlog of features and bugs, real code
+in GitLab with one commit per ticket, and the team's person notes in the vault.
+``team.py`` then plays the team through new sprints; see SIMULATION.md.
+
 Safe to re-run: every run resets to the same known state (the Jira project is
-deleted and rebuilt, the GitLab branch reset, the Confluence pages updated).
-Reads tokens from test/devstack/donnyt/.env and, when done, points
-test/devstack/donnyt/config.toml at what it created.
+deleted and rebuilt, GitLab ``main`` is replaced and open work removed, the
+vault's notes are rewritten, the Confluence pages updated). Reads tokens from
+test/devstack/donnyt/.env and, when done, points test/devstack/donnyt/config.toml
+at what it created.
 
     python test/devstack/seed.py                 # everything
-    python test/devstack/seed.py jira confluence # just these
+    python test/devstack/seed.py jira vault      # just these
 
 Stdlib only, like the toolkit itself.
 """
@@ -14,108 +20,51 @@ Stdlib only, like the toolkit itself.
 from __future__ import annotations
 
 import json
+import os
+import re
+import secrets
+import shutil
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import date, timedelta
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ENV = HERE / "donnyt" / ".env"
+TOKENS = HERE / "donnyt" / "team-tokens.json"
+PATCHES = HERE / "todo" / "patches"
 
-GITLAB = "http://127.0.0.1:8929/api/v4"
-PROJECT = "team/api"
-BRANCH = "feature/TEAM-1-order-cache"
+GITLAB_WEB = "http://127.0.0.1:8929"
+GITLAB = f"{GITLAB_WEB}/api/v4"
+PROJECT = "team/todo"
 
-# The demo change: a service split plus a read cache, in three commits, so an
-# MR description has something real to describe.
-COMMITS = [
-    (
-        "TEAM-1 Split OrderService into reader and writer",
-        {
-            "src/orders/reader.py": '''\
-class OrderReader:
-    """Read side of orders. Safe to cache: it never writes."""
-
-    def __init__(self, db):
-        self.db = db
-
-    def get(self, order_id):
-        return self.db.fetch_one("SELECT * FROM orders WHERE id = %s", order_id)
-''',
-            "src/orders/writer.py": '''\
-class OrderWriter:
-    """Write side of orders."""
-
-    def __init__(self, db):
-        self.db = db
-
-    def save(self, order):
-        self.db.execute(
-            "INSERT INTO orders (id, total) VALUES (%s, %s)", order.id, order.total
-        )
-''',
-        },
-    ),
-    (
-        "TEAM-1 Cache order reads for 60 seconds",
-        {
-            "src/orders/cache.py": '''\
-import time
-
-
-class CachedOrderReader:
-    """Wraps an OrderReader with a per-order time-to-live cache."""
-
-    def __init__(self, reader, ttl=60):
-        self.reader = reader
-        self.ttl = ttl
-        self._cache = {}
-
-    def get(self, order_id):
-        hit = self._cache.get(order_id)
-        if hit and time.monotonic() - hit[0] < self.ttl:
-            return hit[1]
-        value = self.reader.get(order_id)
-        self._cache[order_id] = (time.monotonic(), value)
-        return value
-''',
-        },
-    ),
-    (
-        "TEAM-1 Test cache hits and expiry",
-        {
-            "tests/test_cache.py": '''\
-from src.orders.cache import CachedOrderReader
-
-
-class FakeReader:
-    def __init__(self):
-        self.calls = 0
-
-    def get(self, order_id):
-        self.calls += 1
-        return {"id": order_id}
-
-
-def test_second_read_is_cached():
-    reader = FakeReader()
-    cached = CachedOrderReader(reader)
-    cached.get(1)
-    cached.get(1)
-    assert reader.calls == 1
-
-
-def test_expired_entry_is_refetched():
-    reader = FakeReader()
-    cached = CachedOrderReader(reader, ttl=0)
-    cached.get(1)
-    cached.get(1)
-    assert reader.calls == 2
-''',
-        },
-    ),
+# (login, display name, role, focus). The login is the Jira username
+# and the GitLab username; the display name must match Jira's exactly.
+PEOPLE = [
+    ("maya", "Maya Cohen", "Backend lead",
+     ["Own the storage layer and anything that changes the data model",
+      "Review every change to internal/todo/store.go"]),
+    ("dan", "Dan Levi", "Platform",
+     ["Runtime, configuration, deployment, anything in cmd/",
+      "Keep the build and the tests fast"]),
+    ("noa", "Noa Katz", "API features",
+     ["New endpoints and query parameters",
+      "Pair with Tamar on API docs"]),
+    ("omer", "Omer Shapiro", "Reliability and security",
+     ["Validation, error handling, rate limiting, auth",
+      "Mentor Lior; review his MRs"]),
+    ("lior", "Lior Ben-David", "Junior engineer",
+     ["Grow through middleware and tests, one layer at a time",
+      "Take one ticket a sprint outside his comfort zone, paired with Omer"]),
+    ("tamar", "Tamar Adler", "Engineer, part-time (50%)",
+     ["Docs and tests",
+      "Nothing on the critical path of a sprint goal"]),
 ]
+NAMES = {login: display for login, display, *_ in PEOPLE}
 
 
 def env(name: str) -> str:
@@ -153,48 +102,105 @@ def ok(result: tuple[int, object], what: str) -> object:
     return body
 
 
+def git(*args: str, cwd: Path, env_: dict[str, str] | None = None) -> str:
+    """Run git without any credential helper, so a token URL never prompts."""
+    result = subprocess.run(
+        ["git", "-c", "credential.helper=", "-c", "core.autocrlf=false", *args],
+        cwd=cwd, env={**os.environ, **(env_ or {})}, capture_output=True, text=True,
+    )
+    if result.returncode:
+        raise SystemExit(f"git {' '.join(args[:2])} failed:\n{result.stderr.strip()}")
+    return result.stdout
+
+
 # ---------------------------------------------------------------- gitlab
 
 
-def seed_gitlab() -> None:
+def gitlab_admin() -> tuple[dict[str, str], str]:
     token = env("GITLAB_TOKEN")
     if not token:
         raise SystemExit(f"GITLAB_TOKEN is empty in {ENV}")
-    auth = {"PRIVATE-TOKEN": token}
-    project = f"{GITLAB}/projects/{urllib.parse.quote(PROJECT, safe='')}"
+    return {"PRIVATE-TOKEN": token}, token
 
-    status, _ = call("GET", project, auth)
-    if status != 200:
+
+def project_url() -> str:
+    return f"{GITLAB}/projects/{urllib.parse.quote(PROJECT, safe='')}"
+
+
+def seed_gitlab() -> None:
+    auth, root_token = gitlab_admin()
+    api = lambda method, path, body=None: call(method, GITLAB + path, auth, body)  # noqa: E731
+
+    # The team, as real users: commits, MRs and reviews carry their names.
+    users: dict[str, int] = {}
+    for login, display, *_ in PEOPLE:
+        found = ok(api("GET", f"/users?username={login}"), f"find user {login}")
+        if not found:
+            found = [ok(api("POST", "/users", {
+                "username": login, "name": display, "email": f"{login}@devstack.local",
+                "password": secrets.token_urlsafe(18), "skip_confirmation": True,  # nobody logs in as them
+            }), f"create user {login}")]
+        users[login] = found[0]["id"]
+    print(f"  users: {', '.join(users)}")
+
+    project = project_url()
+    if call("GET", project, auth)[0] != 200:
         group, name = PROJECT.split("/")
-        status, found = call("GET", f"{GITLAB}/groups/{group}", auth)
+        status, found = api("GET", f"/groups/{group}")
         if status != 200:
-            found = ok(call("POST", f"{GITLAB}/groups", auth,
-                            {"name": group, "path": group, "visibility": "private"}), "create group")
-        ok(call("POST", f"{GITLAB}/projects", auth,
-                {"name": name, "path": name, "namespace_id": found["id"],
-                 "initialize_with_readme": True, "default_branch": "main"}), "create project")
+            found = ok(api("POST", "/groups", {"name": group, "path": group, "visibility": "private"}),
+                       "create group")
+        ok(api("POST", "/projects", {"name": name, "path": name, "namespace_id": found["id"]}),
+           "create project")
         print(f"  created project {PROJECT}")
+    for login, uid in users.items():
+        call("POST", f"{project}/members", auth, {"user_id": uid, "access_level": 30})  # 409 if already in
 
-    # Reset the branch so every run produces the same three commits.
-    call("DELETE", f"{project}/repository/branches/{urllib.parse.quote(BRANCH, safe='')}", auth)
-    for n, (message, files) in enumerate(COMMITS):
-        body: dict = {
-            "branch": BRANCH,
-            "commit_message": message,
-            "actions": [
-                {"action": "create", "file_path": path, "content": content}
-                for path, content in files.items()
-            ],
-        }
-        if n == 0:
-            body["start_branch"] = "main"
-        status, result = call("POST", f"{project}/repository/commits", auth, body)
-        if status not in (200, 201):
-            raise SystemExit(f"Commit {message!r} failed: HTTP {status} {result}")
-        print(f"  committed {result['short_id']}  {message}")
+    # Start clean: no open or old MRs, no branches but main.
+    mrs = ok(call("GET", f"{project}/merge_requests?state=all&per_page=100", auth), "list MRs")
+    for mr in mrs:
+        call("DELETE", f"{project}/merge_requests/{mr['iid']}", auth)
+    branches = ok(call("GET", f"{project}/repository/branches?per_page=100", auth), "list branches")
+    for branch in branches if isinstance(branches, list) else []:
+        if branch["name"] != "main":
+            call("DELETE", f"{project}/repository/branches/{urllib.parse.quote(branch['name'], safe='')}", auth)
 
-    _, compare = call("GET", f"{project}/repository/compare?from=main&to={urllib.parse.quote(BRANCH)}", auth)
-    print(f"gitlab: {PROJECT} {BRANCH} -- {len(compare['commits'])} commits, {len(compare['diffs'])} files")
+    # Replay v0: one commit per ticket, committed as its author on its date.
+    patches = sorted(PATCHES.glob("*.patch"))
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        git("init", "-q", "-b", "main", cwd=repo)
+        for patch in patches:
+            header = patch.read_text(encoding="utf-8").split("\n\n", 1)[0]
+            name, email = re.search(r"^From: (.+?) <(.+?)>$", header, re.M).groups()
+            git("am", "-q", "--committer-date-is-author-date", str(patch), cwd=repo, env_={
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            })
+        # main is protected; lift it for the force-push, then protect it the
+        # way a team would: merge through MRs, no direct pushes by developers.
+        call("DELETE", f"{project}/protected_branches/main", auth)
+        remote = f"http://root:{root_token}@{GITLAB_WEB.removeprefix('http://')}/{PROJECT}.git"
+        git("push", "-q", "--force", remote, "main", cwd=repo)
+        ok(call("POST", f"{project}/protected_branches", auth, {
+            "name": "main", "push_access_level": 40, "merge_access_level": 30,
+        }), "protect main")
+    call("PUT", project, auth, {"default_branch": "main"})
+    print(f"  {PROJECT} main: {len(patches)} commits, one per v0 ticket")
+
+    # A token per person, for team.py to act as them. Old ones are revoked.
+    tokens: dict[str, str] = {}
+    expires = (date.today() + timedelta(days=300)).isoformat()
+    for login, uid in users.items():
+        existing = ok(api("GET", f"/users/{uid}/impersonation_tokens?state=active"), f"tokens {login}")
+        for token in existing:
+            if token["name"] == "donnyt-sim":
+                api("DELETE", f"/users/{uid}/impersonation_tokens/{token['id']}")
+        created = ok(api("POST", f"/users/{uid}/impersonation_tokens", {
+            "name": "donnyt-sim", "scopes": ["api", "write_repository"], "expires_at": expires,
+        }), f"token for {login}")
+        tokens[login] = created["token"]
+    TOKENS.write_text(json.dumps(tokens, indent=2) + "\n", encoding="utf-8")
+    print(f"  tokens: {TOKENS.relative_to(HERE.parent.parent)}")
 
 
 # ------------------------------------------------------------------ jira
@@ -202,56 +208,79 @@ def seed_gitlab() -> None:
 JIRA = "http://127.0.0.1:8080"
 KEY = "TEAM"
 
-PEOPLE = [
-    ("maya", "Maya Cohen", 8), ("dan", "Dan Levi", 8), ("noa", "Noa Katz", 6),
-    ("omer", "Omer Shapiro", 8), ("lior", "Lior Ben-David", 6), ("tamar", "Tamar Adler", 4),
-]
-
-# Two-week sprints. 1-4 are closed history, 5 is in flight, 6 is next.
+# Two-week sprints, Sunday to Thursday. All three built v0 and are closed;
+# the next sprint is planned from a brief, through DonnyT.
 SPRINTS = [
-    ("TEAM Sprint 1", "2026-07-20", "2026-08-02", "Stand up the orders service"),
-    ("TEAM Sprint 2", "2026-08-03", "2026-08-16", "Refunds and order history"),
-    ("TEAM Sprint 3", "2026-08-17", "2026-08-30", "Harden the public order API"),
-    ("TEAM Sprint 4", "2026-08-31", "2026-09-13", "Payment reliability"),
-    ("TEAM Sprint 5", "2026-09-14", "2026-09-27", "Fast order reads"),
-    ("TEAM Sprint 6", "2026-09-28", "2026-10-11", ""),
+    ("TEAM Sprint 1", "2026-08-16", "2026-08-27", "Stand up the todo API: create and list"),
+    ("TEAM Sprint 2", "2026-08-30", "2026-09-10", "Full CRUD with clean errors"),
+    ("TEAM Sprint 3", "2026-09-13", "2026-09-24", "v0: todos can be completed, the API is documented and shuts down cleanly"),
 ]
 
-# (summary, type, points, assignee, sprints it sat in, sprint it was finished
-# in -- or the status it is in now). Created in this order, so the first is
-# TEAM-1, the key the GitLab demo branch carries.
+# (summary, type, assignee, sprints it sat in, sprint finished in -- or its
+# status now, description). Created in order: the first ten are TEAM-1..10 and
+# match the commits in todo/patches. Nothing is estimated -- the team does not
+# use story points. TEAM-4 spills over from Sprint 2 into Sprint 3.
 #
-# TEAM-6 and TEAM-9 spill over: unfinished when their first sprint closed,
-# done in the next. Jira keeps both sprints on the issue, which is exactly the
-# case that inflates a naive velocity count.
-#
-# Only Stories carry points: the default scrum setup does not allow story
-# points on Bugs or Tasks, so those stay unestimated -- as on most real boards.
-ISSUES: list[tuple[str, str, float | None, str, list[int], int | str]] = [
-    ("Cache order reads", "Story", 5, "maya", [5], "In Progress"),
-    ("Set up orders service skeleton", "Story", 3, "dan", [1], 1),
-    ("Validate order totals", "Story", 2, "noa", [1], 1),
-    ("Order history endpoint", "Story", 5, "maya", [1], 1),
-    ("Paginate order history", "Story", 3, "dan", [2], 2),
-    ("Refund API", "Story", 8, "maya", [2, 3], 3),
-    ("Fix rounding in order totals", "Bug", None, "noa", [2], 2),
-    ("Audit log for order changes", "Story", 3, "dan", [2], 2),
-    ("Rate-limit the public order API", "Story", 5, "noa", [3, 4], 4),
-    ("Split OrderService into reader and writer", "Story", 3, "maya", [3], 3),
-    ("Export orders as CSV", "Story", 2, "dan", [3], 3),
-    ("Retry failed payment webhooks", "Story", 5, "dan", [4], 4),
-    ("Order status notifications", "Story", 3, "noa", [4], 4),
-    ("Upgrade the database driver", "Story", 2, "maya", [4], 4),
-    ("Invalidate cache on order update", "Story", 3, "maya", [5], "To Do"),
-    ("Load-test order reads", "Story", 3, "dan", [5], "In Progress"),
-    ("Customer order search", "Story", 5, "noa", [5], "Done"),
-    ("Flaky test in the checkout suite", "Bug", None, "dan", [5], "To Do"),
-    ("Multi-currency order totals", "Story", 8, "", [], "To Do"),
-    ("Nightly order archival job", "Story", 5, "", [], "To Do"),
-    ("GraphQL order query", "Story", None, "", [], "To Do"),
-    ("Admin order dashboard", "Story", 5, "", [], "To Do"),
-    ("Retire the legacy v1 order endpoint", "Story", 3, "", [], "To Do"),
-    ("Improve order API docs", "Task", None, "", [], "To Do"),
+# The backlog is deliberately uneven, from a one-line fix to a cross-cutting
+# change, so estimation has something to tell apart. TEAM-11 and TEAM-12 are
+# real bugs in v0.
+ISSUES: list[tuple[str, str, str, list[int], int | str, str]] = [
+    ("Project skeleton and health check", "Task", "dan", [1], 1,
+     "Go module, cmd/todo, GET /healthz returning ok."),
+    ("Todo model and in-memory store", "Story", "maya", [1], 1,
+     "Todo type and a concurrency-safe in-memory store with create, list and get."),
+    ("Create and list todos", "Story", "noa", [1], 1,
+     "POST /todos and GET /todos."),
+    ("Get, update and delete a todo", "Story", "noa", [2, 3], 3,
+     "GET, PATCH and DELETE /todos/{id}. 404 for an unknown id, 400 for a bad one."),
+    ("Validate input and return JSON errors", "Story", "omer", [2], 2,
+     "Titles required, trimmed, at most 200 characters. Every error is {\"error\": \"...\"}."),
+    ("Request logging middleware", "Story", "lior", [2], 2,
+     "One log line per request: method, path, status, duration."),
+    ("Handler tests", "Task", "tamar", [2], 2,
+     "httptest coverage for create and list, including bad input."),
+    ("Graceful shutdown and config from env", "Task", "dan", [3], 3,
+     "TODO_ADDR for the listen address; drain in-flight requests on SIGTERM."),
+    ("Mark a todo done or undone", "Story", "maya", [3], 3,
+     "PATCH /todos/{id} accepts \"done\"; leaving it out keeps the current state."),
+    ("README with API examples", "Task", "tamar", [3], 3,
+     "How to run it, every endpoint, curl examples."),
+    # -- backlog --
+    ("List returns todos in random order", "Bug", "", [], "To Do",
+     "GET /todos returns the same todos in a different order on each call. "
+     "They should come back oldest first (by id)."),
+    ("PATCH without a title blanks the title", "Bug", "", [], "To Do",
+     "PATCH /todos/1 with {\"done\": true} sets the title to \"\". A PATCH should change only the "
+     "fields it sends, and a title that is sent should be validated like on create."),
+    ("Filter todos by done state", "Story", "", [], "To Do",
+     "GET /todos?done=true|false. Any other value is a 400."),
+    ("Search todos by title", "Story", "", [], "To Do",
+     "GET /todos?q=milk: case-insensitive substring match. Combines with ?done."),
+    ("Complete several todos at once", "Story", "", [], "To Do",
+     "POST /todos/complete with {\"ids\": [1, 2]}. All or nothing: an unknown id fails the request."),
+    ("Due dates on todos", "Story", "", [], "To Do",
+     "Optional due date (YYYY-MM-DD) on create and update, validated. GET /todos?overdue=true."),
+    ("Priority and sorting", "Story", "", [], "To Do",
+     "Priority low / normal / high (default normal). GET /todos?sort=priority|created|due."),
+    ("Tags on todos", "Story", "", [], "To Do",
+     "Up to 10 tags per todo, lower-cased. GET /todos?tag=home."),
+    ("Paginate the todo list", "Story", "", [], "To Do",
+     "?limit (default 50, max 200) and ?offset; total count in an X-Total-Count header."),
+    ("Soft delete and restore", "Story", "", [], "To Do",
+     "DELETE hides a todo; POST /todos/{id}/restore brings it back; GET /todos?deleted=true lists them."),
+    ("Keep todos across restarts", "Story", "", [], "To Do",
+     "Persist to a JSON file (TODO_DATA). Writes are atomic: a crash never leaves a half-written file."),
+    ("Rate limit the API", "Story", "", [], "To Do",
+     "Per client IP, token bucket, configurable. 429 with Retry-After when exceeded. /healthz is exempt."),
+    ("API keys", "Story", "", [], "To Do",
+     "Every request except /healthz needs X-API-Key, one of TODO_API_KEYS. 401 otherwise."),
+    ("OpenAPI description of the API", "Task", "", [], "To Do",
+     "openapi.json served at /openapi.json, with a test that every registered route is described."),
+    ("Storage behind an interface", "Story", "", [], "To Do",
+     "Handlers depend on a Store interface, not the in-memory type, so a file or database store "
+     "can be swapped in. No behaviour change."),
+    ("Users with their own todo lists", "Story", "", [], "To Do",
+     "Each API key belongs to a user; todos are scoped to their owner. Another user's todo is a 404."),
 ]
 
 
@@ -263,13 +292,13 @@ def seed_jira() -> dict[str, object]:
     api = lambda method, path, body=None: call(method, JIRA + path, auth, body)  # noqa: E731
 
     # People -- only the display name matters to DonnyT; nobody logs in as them.
-    for name, display, _ in PEOPLE:
+    for name, display, *_ in PEOPLE:
         if api("GET", f"/rest/api/2/user?username={name}")[0] != 200:
             ok(api("POST", "/rest/api/2/user", {
                 "name": name, "displayName": display, "emailAddress": f"{name}@devstack.local",
                 "password": "Unused-" + token[:12], "applicationKeys": ["jira-software"],
             }), f"create user {name}")
-    print(f"  users: {', '.join(d for _, d, _ in PEOPLE)}")
+    print(f"  users: {', '.join(d for _, d, *_ in PEOPLE)}")
 
     # Start from a clean project so a re-run gives the same history.
     if api("GET", f"/rest/api/2/project/{KEY}")[0] == 200:
@@ -281,7 +310,7 @@ def seed_jira() -> dict[str, object]:
     # backlog item looks like the admin's work. (Jira 10 allows unassigned
     # issues out of the box; its REST API does not expose that switch.)
     ok(api("POST", "/rest/api/2/project", {
-        "key": KEY, "name": "Team Orders", "lead": "admin",
+        "key": KEY, "name": "Team Todo", "lead": "admin",
         "projectTypeKey": "software", "assigneeType": "UNASSIGNED",
         "projectTemplateKey": "com.pyxis.greenhopper.jira:gh-scrum-template",
     }), "create project")
@@ -290,7 +319,7 @@ def seed_jira() -> dict[str, object]:
     for role, url in roles.items():
         if role != "Administrators":
             path = urllib.parse.urlparse(url).path
-            api("POST", path, {"user": [n for n, _, _ in PEOPLE]})
+            api("POST", path, {"user": [n for n, *_ in PEOPLE]})
 
     boards = ok(api("GET", f"/rest/agile/1.0/board?projectKeyOrId={KEY}"), "find board")["values"]
     if not boards:
@@ -304,19 +333,14 @@ def seed_jira() -> dict[str, object]:
     points = next((f["id"] for f in fields if f["name"] == "Story Points"), "")
     print(f"  project {KEY}, board {board}, story points field {points or '(none)'}")
 
-    # Issues, then estimates through the agile API: it writes to whatever field
-    # the board estimates with, whether or not that field is on the screen.
     keys: list[str] = []
-    for summary, kind, pts, who, _, _ in ISSUES:
-        fields_ = {"project": {"key": KEY}, "summary": summary, "issuetype": {"name": kind}}
+    for summary, kind, who, _, _, description in ISSUES:
+        fields_ = {"project": {"key": KEY}, "summary": summary, "issuetype": {"name": kind},
+                   "description": description}
         if who:
             fields_["assignee"] = {"name": who}
-        created = ok(api("POST", "/rest/api/2/issue", {"fields": fields_}), f"create {summary!r}")
-        keys.append(created["key"])
-        if pts is not None:
-            ok(api("PUT", f"/rest/agile/1.0/issue/{created['key']}/estimation?boardId={board}",
-                   {"value": str(pts)}), f"estimate {created['key']}")
-    print(f"  issues: {keys[0]} .. {keys[-1]} ({len(keys)})")
+        keys.append(ok(api("POST", "/rest/api/2/issue", {"fields": fields_}), f"create {summary!r}")["key"])
+    print(f"  issues: {keys[0]} .. {keys[-1]} ({len(keys)}), none estimated")
 
     def move(key: str, status: str) -> None:
         options = ok(api("GET", f"/rest/api/2/issue/{key}/transitions"), f"transitions {key}")
@@ -326,74 +350,63 @@ def seed_jira() -> dict[str, object]:
                f"move {key} to {status}")
 
     # Replay the history sprint by sprint: fill it, start it, finish what was
-    # finished in it, close it.
+    # finished in it, leave the rest in progress, close it.
     for n, (name, start, end, goal) in enumerate(SPRINTS, 1):
+        dates = {"startDate": f"{start}T09:00:00.000+03:00", "endDate": f"{end}T18:00:00.000+03:00"}
         sprint = ok(api("POST", "/rest/agile/1.0/sprint", {
-            "name": name, "originBoardId": board, "goal": goal,
-            "startDate": f"{start}T09:00:00.000+03:00", "endDate": f"{end}T18:00:00.000+03:00",
-        }), f"create {name}")
-        members = [keys[i] for i, issue in enumerate(ISSUES) if n in issue[4]]
-        if members:
-            ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}/issue", {"issues": members}), f"fill {name}")
-        if n > 5:
-            print(f"  {name}: future, empty")
-            continue
-        ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}", {
-            "state": "active",
-            "startDate": f"{start}T09:00:00.000+03:00", "endDate": f"{end}T18:00:00.000+03:00",
-        }), f"start {name}")
-        for i, issue in enumerate(ISSUES):
-            outcome = issue[5]
-            if outcome == n or (n == 5 and n in issue[4] and isinstance(outcome, str)):
-                target = "Done" if outcome == n else outcome
-                if target != "To Do":
-                    if target == "Done":
-                        move(keys[i], "In Progress")
-                    move(keys[i], target)
-        if n < 5:
-            ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}", {"state": "closed"}), f"close {name}")
-        state = "closed" if n < 5 else "active"
-        print(f"  {name}: {state}, {len(members)} issues")
+            "name": name, "originBoardId": board, "goal": goal, **dates}), f"create {name}")
+        members = [i for i, issue in enumerate(ISSUES) if n in issue[3]]
+        ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}/issue",
+               {"issues": [keys[i] for i in members]}), f"fill {name}")
+        ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}", {"state": "active", **dates}), f"start {name}")
+        for i in members:
+            if ISSUES[i][4] == n:
+                move(keys[i], "In Progress")
+                move(keys[i], "Done")
+            else:
+                move(keys[i], "In Progress")
+        ok(api("POST", f"/rest/agile/1.0/sprint/{sprint['id']}", {"state": "closed"}), f"close {name}")
+        done = sum(1 for i in members if ISSUES[i][4] == n)
+        print(f"  {name}: closed, {done}/{len(members)} done")
 
     return {"board": board, "points": points}
+
+
+# ------------------------------------------------------------------ vault
+
+VAULT = HERE / "donnyt" / "vault"
+REPO_VAULT = HERE.parent.parent / "vault"
+
+
+def seed_vault() -> None:
+    """Reset the devstack vault to the team: person notes with Focus, the repo's templates."""
+    for folder in ("People", "Sprints", "MRs", "Projects", "Decisions", "Meetings", "Topics"):
+        for note in (VAULT / folder).glob("*.md"):
+            if note.name != "README.md":
+                note.unlink()
+    shutil.copytree(REPO_VAULT / "_templates", VAULT / "_templates", dirs_exist_ok=True)
+    for readme in REPO_VAULT.glob("*/README.md"):
+        if readme.parent.name != "_templates":
+            (VAULT / readme.parent.name).mkdir(parents=True, exist_ok=True)
+            shutil.copy(readme, VAULT / readme.parent.name / "README.md")
+
+    for login, display, role, focus in PEOPLE:
+        note = VAULT / "People" / f"{display}.md"
+        note.write_text("\n".join([
+            "---", "type: person", f"role: {role}", f"jira: {login}", f"gitlab: {login}",
+            "tags:", "  - person", "---", "",
+            f"# {display}", "",
+            "## Focus", "", *[f"- {line}" for line in focus], "",
+            "## Context", "", f"{role} on the todo API team.", "",
+            "## One-on-ones", "",
+        ]) + "\n", encoding="utf-8")
+    print(f"  {len(PEOPLE)} person notes, templates, empty Sprints/ at {VAULT.relative_to(HERE.parent.parent)}")
 
 
 # ------------------------------------------------------------ confluence
 
 CONFLUENCE = "http://127.0.0.1:8090"
 SPACE = "ENG"
-TEMPLATE_TITLE = "Merge Request Template"
-
-# Written the way real teams write templates: a callout, placeholders, a
-# status macro in a table, a task list, an expand and a warning. Each of these
-# is a different macro shape for the Markdown converter to get right.
-TEMPLATE = """\
-<ac:structured-macro ac:name="info"><ac:rich-text-body><p>Copy this template into every merge request. Keep every heading; if a section does not apply, write N/A and say why.</p></ac:rich-text-body></ac:structured-macro>
-<h2>Summary</h2>
-<p><ac:placeholder>What does this MR change, in one or two sentences?</ac:placeholder></p>
-<h2>Jira issue</h2>
-<p><ac:placeholder>Link the issue, e.g. TEAM-123.</ac:placeholder></p>
-<h2>Why</h2>
-<p><ac:placeholder>The problem this solves, or the decision behind it.</ac:placeholder></p>
-<h2>What changed</h2>
-<ul><li><ac:placeholder>The main change, concretely.</ac:placeholder></li></ul>
-<h2>Risk</h2>
-<table><tbody>
-<tr><th>Area</th><th>Risk</th><th>Mitigation</th></tr>
-<tr><td>Database</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter><ac:parameter ac:name="title">Low</ac:parameter></ac:structured-macro></td><td><ac:placeholder>Migrations, locks, backfills.</ac:placeholder></td></tr>
-<tr><td>API</td><td><ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Yellow</ac:parameter><ac:parameter ac:name="title">Medium</ac:parameter></ac:structured-macro></td><td><ac:placeholder>Breaking changes, versioning.</ac:placeholder></td></tr>
-</tbody></table>
-<h2>Testing</h2>
-<ac:task-list>
-<ac:task><ac:task-id>1</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Unit tests added or updated</ac:task-body></ac:task>
-<ac:task><ac:task-id>2</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>Tested locally against a real database</ac:task-body></ac:task>
-<ac:task><ac:task-id>3</ac:task-id><ac:task-status>incomplete</ac:task-status><ac:task-body>No new warnings in CI</ac:task-body></ac:task>
-</ac:task-list>
-<h2>Rollout</h2>
-<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">Rollout checklist</ac:parameter><ac:rich-text-body><ul><li>Behind a feature flag, or safe to ship dark</li><li>Migration order written down</li><li>Rollback plan</li></ul></ac:rich-text-body></ac:structured-macro>
-<ac:structured-macro ac:name="warning"><ac:rich-text-body><p>Anything touching auth, payments or data deletion needs a second reviewer.</p></ac:rich-text-body></ac:structured-macro>
-"""
-
 PRD_TITLE = "PRD Template"
 
 # A product requirements template that comes *before* the tickets: it starts
@@ -487,13 +500,12 @@ def seed_confluence() -> dict[str, object]:
             page = ok(api("POST", "/rest/api/content", body), f"create {title!r}")
         return str(page["id"])
 
-    template_id = upsert(TEMPLATE_TITLE, TEMPLATE)
     plans_id = upsert("Sprint Plans", "<p>Sprint plans published by DonnyT live under this page.</p>")
     prd_id = upsert(PRD_TITLE, PRD)
     prds_id = upsert("Product Requirements", "<p>PRDs published by DonnyT live under this page.</p>")
-    print(f"  space {SPACE}: template page {template_id}, sprint plans page {plans_id}, "
+    print(f"  space {SPACE}: sprint plans page {plans_id}, "
           f"PRD template {prd_id}, PRDs page {prds_id}")
-    return {"template": template_id, "plans": plans_id, "prd_template": prd_id, "prds": prds_id}
+    return {"plans": plans_id, "prd_template": prd_id, "prds": prds_id}
 
 
 # ------------------------------------------------------------ donnyt config
@@ -503,24 +515,25 @@ CONFIG = HERE / "donnyt" / "config.toml"
 
 def write_config(jira: dict[str, object] | None, confluence: dict[str, object] | None) -> None:
     """Point the devstack's DonnyT config at what was just created."""
-    import re
-
     text = CONFIG.read_text(encoding="utf-8")
 
     def setting(key: str, value: str) -> None:
         nonlocal text
-        text = re.sub(rf"(?m)^{key}\s*=.*$", f"{key} = {value}", text, count=1)
+        text = re.sub(rf"(?m)^{key}\s*=.*$", lambda _: f"{key} = {value}", text, count=1)
 
+    setting("default_project", f'"{PROJECT}"')
+    # The team, and its week: Sunday to Thursday.
+    text = re.sub(r"(?ms)^\[team\]\n.*?(?=^\[)", "", text)
+    text = re.sub(r"(?ms)^\[\[team\.members\]\].*", "", text).rstrip() + "\n\n"
+    text += '[team]\nweekend = ["Fri", "Sat"]\n\n' + "\n".join(
+        f'[[team.members]]\nname = "{display}"\njira = "{login}"\ngitlab = "{login}"\n'
+        for login, display, *_ in PEOPLE
+    )
     if jira:
         setting("board_id", str(jira["board"]))
         if jira["points"]:
             setting("story_points_field", f'"{jira["points"]}"')
-        text = re.sub(r"(?ms)^\[\[team\.members\]\].*", "", text).rstrip() + "\n\n" + "\n".join(
-            f'[[team.members]]\nname = "{display}"\njira = "{name}"\ngitlab = ""\ncapacity = {cap}\n'
-            for name, display, cap in PEOPLE
-        )
     if confluence:
-        setting("mr_template_page_id", f'"{confluence["template"]}"')
         for key, value in (
             ("sprint_plan_parent_page_id", confluence["plans"]),
             ("prd_template_page_id", confluence["prd_template"]),
@@ -534,7 +547,7 @@ def write_config(jira: dict[str, object] | None, confluence: dict[str, object] |
     print(f"donnyt: updated {CONFIG.relative_to(HERE.parent.parent)}")
 
 
-SEEDERS = {"gitlab": seed_gitlab, "jira": seed_jira, "confluence": seed_confluence}
+SEEDERS = {"gitlab": seed_gitlab, "jira": seed_jira, "confluence": seed_confluence, "vault": seed_vault}
 
 
 def main() -> int:

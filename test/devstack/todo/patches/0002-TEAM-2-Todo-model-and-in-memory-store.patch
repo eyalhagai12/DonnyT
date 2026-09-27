@@ -1,0 +1,151 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Maya Cohen <maya@devstack.local>
+Date: Thu, 20 Aug 2026 11:00:00 +0300
+Subject: [PATCH 02/10] TEAM-2 Todo model and in-memory store
+
+---
+ internal/todo/store.go      | 60 +++++++++++++++++++++++++++++++++++++
+ internal/todo/store_test.go | 46 ++++++++++++++++++++++++++++
+ internal/todo/todo.go       | 13 ++++++++
+ 3 files changed, 119 insertions(+)
+ create mode 100644 internal/todo/store.go
+ create mode 100644 internal/todo/store_test.go
+ create mode 100644 internal/todo/todo.go
+
+diff --git a/internal/todo/store.go b/internal/todo/store.go
+new file mode 100644
+index 0000000..e50ee13
+--- /dev/null
++++ b/internal/todo/store.go
+@@ -0,0 +1,60 @@
++package todo
++
++import (
++	"errors"
++	"sync"
++	"time"
++)
++
++// ErrNotFound is returned for an id the store does not hold.
++var ErrNotFound = errors.New("todo not found")
++
++// Store keeps todos in memory. It is safe for concurrent use. Everything is
++// lost when the process stops.
++type Store struct {
++	mu     sync.Mutex
++	nextID int
++	todos  map[int]*Todo
++	now    func() time.Time
++}
++
++// NewStore returns an empty store. Ids start at 1.
++func NewStore() *Store {
++	return &Store{nextID: 1, todos: map[int]*Todo{}, now: time.Now}
++}
++
++// Create adds a todo with the given title and returns it.
++func (s *Store) Create(title string) Todo {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	now := s.now()
++	t := &Todo{ID: s.nextID, Title: title, CreatedAt: now, UpdatedAt: now}
++	s.todos[t.ID] = t
++	s.nextID++
++	return *t
++}
++
++// List returns every todo.
++func (s *Store) List() []Todo {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	out := make([]Todo, 0, len(s.todos))
++	for _, t := range s.todos {
++		out = append(out, *t)
++	}
++	return out
++}
++
++// Get returns the todo with the given id.
++func (s *Store) Get(id int) (Todo, error) {
++	s.mu.Lock()
++	defer s.mu.Unlock()
++
++	t, ok := s.todos[id]
++	if !ok {
++		return Todo{}, ErrNotFound
++	}
++	return *t, nil
++}
+diff --git a/internal/todo/store_test.go b/internal/todo/store_test.go
+new file mode 100644
+index 0000000..f404357
+--- /dev/null
++++ b/internal/todo/store_test.go
+@@ -0,0 +1,46 @@
++package todo
++
++import (
++	"errors"
++	"testing"
++)
++
++func TestCreateAssignsIncreasingIDs(t *testing.T) {
++	s := NewStore()
++	first := s.Create("buy milk")
++	second := s.Create("walk the dog")
++
++	if first.ID != 1 || second.ID != 2 {
++		t.Fatalf("ids = %d, %d; want 1, 2", first.ID, second.ID)
++	}
++	if first.Done {
++		t.Error("a new todo should not be done")
++	}
++}
++
++func TestGet(t *testing.T) {
++	s := NewStore()
++	created := s.Create("buy milk")
++
++	got, err := s.Get(created.ID)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got.Title != "buy milk" {
++		t.Errorf("title = %q; want %q", got.Title, "buy milk")
++	}
++
++	if _, err := s.Get(99); !errors.Is(err, ErrNotFound) {
++		t.Errorf("Get(99) error = %v; want ErrNotFound", err)
++	}
++}
++
++func TestList(t *testing.T) {
++	s := NewStore()
++	s.Create("a")
++	s.Create("b")
++
++	if got := len(s.List()); got != 2 {
++		t.Errorf("len(List()) = %d; want 2", got)
++	}
++}
+diff --git a/internal/todo/todo.go b/internal/todo/todo.go
+new file mode 100644
+index 0000000..b165a00
+--- /dev/null
++++ b/internal/todo/todo.go
+@@ -0,0 +1,13 @@
++// Package todo is the todo list: the model, its store and its HTTP handlers.
++package todo
++
++import "time"
++
++// Todo is one item on the list.
++type Todo struct {
++	ID        int       `json:"id"`
++	Title     string    `json:"title"`
++	Done      bool      `json:"done"`
++	CreatedAt time.Time `json:"created_at"`
++	UpdatedAt time.Time `json:"updated_at"`
++}

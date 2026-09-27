@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Noa Katz <noa@devstack.local>
+Date: Tue, 25 Aug 2026 11:00:00 +0300
+Subject: [PATCH 03/10] TEAM-3 Create and list todos
+
+---
+ cmd/todo/main.go         |  3 +++
+ internal/todo/handler.go | 42 ++++++++++++++++++++++++++++++++++++++++
+ 2 files changed, 45 insertions(+)
+ create mode 100644 internal/todo/handler.go
+
+diff --git a/cmd/todo/main.go b/cmd/todo/main.go
+index 07273ee..77cf1bd 100644
+--- a/cmd/todo/main.go
++++ b/cmd/todo/main.go
+@@ -4,6 +4,8 @@ package main
+ import (
+ 	"log"
+ 	"net/http"
++
++	"example.local/todo/internal/todo"
+ )
+ 
+ func main() {
+@@ -11,6 +13,7 @@ func main() {
+ 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+ 		w.Write([]byte("ok\n"))
+ 	})
++	todo.NewHandler(todo.NewStore()).Register(mux)
+ 
+ 	log.Printf("listening on :8081")
+ 	log.Fatal(http.ListenAndServe(":8081", mux))
+diff --git a/internal/todo/handler.go b/internal/todo/handler.go
+new file mode 100644
+index 0000000..d6b73bf
+--- /dev/null
++++ b/internal/todo/handler.go
+@@ -0,0 +1,42 @@
++package todo
++
++import (
++	"encoding/json"
++	"net/http"
++)
++
++// Handler serves the todo API over a Store.
++type Handler struct {
++	store *Store
++}
++
++// NewHandler returns a Handler backed by store.
++func NewHandler(store *Store) *Handler {
++	return &Handler{store: store}
++}
++
++// Register adds the todo routes to mux.
++func (h *Handler) Register(mux *http.ServeMux) {
++	mux.HandleFunc("GET /todos", h.list)
++	mux.HandleFunc("POST /todos", h.create)
++}
++
++func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
++	w.Header().Set("Content-Type", "application/json")
++	json.NewEncoder(w).Encode(h.store.List())
++}
++
++type createRequest struct {
++	Title string `json:"title"`
++}
++
++func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
++	var req createRequest
++	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
++		http.Error(w, "invalid JSON", http.StatusBadRequest)
++		return
++	}
++	w.Header().Set("Content-Type", "application/json")
++	w.WriteHeader(http.StatusCreated)
++	json.NewEncoder(w).Encode(h.store.Create(req.Title))
++}

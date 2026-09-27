@@ -1,0 +1,111 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lior Ben-David <lior@devstack.local>
+Date: Thu, 3 Sep 2026 11:00:00 +0300
+Subject: [PATCH 05/10] TEAM-6 Request logging middleware
+
+---
+ cmd/todo/main.go           |  3 ++-
+ internal/httpx/log.go      | 30 ++++++++++++++++++++++++++++++
+ internal/httpx/log_test.go | 37 +++++++++++++++++++++++++++++++++++++
+ 3 files changed, 69 insertions(+), 1 deletion(-)
+ create mode 100644 internal/httpx/log.go
+ create mode 100644 internal/httpx/log_test.go
+
+diff --git a/cmd/todo/main.go b/cmd/todo/main.go
+index 77cf1bd..1cd4525 100644
+--- a/cmd/todo/main.go
++++ b/cmd/todo/main.go
+@@ -5,6 +5,7 @@ import (
+ 	"log"
+ 	"net/http"
+ 
++	"example.local/todo/internal/httpx"
+ 	"example.local/todo/internal/todo"
+ )
+ 
+@@ -16,5 +17,5 @@ func main() {
+ 	todo.NewHandler(todo.NewStore()).Register(mux)
+ 
+ 	log.Printf("listening on :8081")
+-	log.Fatal(http.ListenAndServe(":8081", mux))
++	log.Fatal(http.ListenAndServe(":8081", httpx.Log(log.Default(), mux)))
+ }
+diff --git a/internal/httpx/log.go b/internal/httpx/log.go
+new file mode 100644
+index 0000000..d12b065
+--- /dev/null
++++ b/internal/httpx/log.go
+@@ -0,0 +1,30 @@
++// Package httpx holds HTTP middleware shared by the service.
++package httpx
++
++import (
++	"log"
++	"net/http"
++	"time"
++)
++
++// Log writes one line per request: method, path, status and duration.
++func Log(logger *log.Logger, next http.Handler) http.Handler {
++	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		start := time.Now()
++		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
++		next.ServeHTTP(rec, r)
++		logger.Printf("%s %s %d %s", r.Method, r.URL.Path, rec.status, time.Since(start).Round(time.Microsecond))
++	})
++}
++
++// statusRecorder remembers the status code a handler wrote. A handler that
++// never calls WriteHeader has sent 200.
++type statusRecorder struct {
++	http.ResponseWriter
++	status int
++}
++
++func (r *statusRecorder) WriteHeader(code int) {
++	r.status = code
++	r.ResponseWriter.WriteHeader(code)
++}
+diff --git a/internal/httpx/log_test.go b/internal/httpx/log_test.go
+new file mode 100644
+index 0000000..c63b96c
+--- /dev/null
++++ b/internal/httpx/log_test.go
+@@ -0,0 +1,37 @@
++package httpx
++
++import (
++	"bytes"
++	"log"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++)
++
++func TestLogRecordsMethodPathAndStatus(t *testing.T) {
++	var buf bytes.Buffer
++	handler := Log(log.New(&buf, "", 0), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		w.WriteHeader(http.StatusTeapot)
++	}))
++
++	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/todos", nil))
++
++	line := buf.String()
++	if !strings.HasPrefix(line, "GET /todos 418 ") {
++		t.Errorf("log line = %q; want it to start with %q", line, "GET /todos 418 ")
++	}
++}
++
++func TestLogDefaultsTo200(t *testing.T) {
++	var buf bytes.Buffer
++	handler := Log(log.New(&buf, "", 0), http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++		w.Write([]byte("ok"))
++	}))
++
++	handler.ServeHTTP(httptest.NewRecorder(), httptest.NewRequest("GET", "/healthz", nil))
++
++	if !strings.Contains(buf.String(), " 200 ") {
++		t.Errorf("log line = %q; want status 200", buf.String())
++	}
++}

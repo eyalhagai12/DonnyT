@@ -1,0 +1,53 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Levi <dan@devstack.local>
+Date: Tue, 18 Aug 2026 11:00:00 +0300
+Subject: [PATCH 01/10] TEAM-1 Project skeleton and health check
+
+---
+ .gitattributes   |  1 +
+ cmd/todo/main.go | 17 +++++++++++++++++
+ go.mod           |  3 +++
+ 3 files changed, 21 insertions(+)
+ create mode 100644 .gitattributes
+ create mode 100644 cmd/todo/main.go
+ create mode 100644 go.mod
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..6313b56
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++* text=auto eol=lf
+diff --git a/cmd/todo/main.go b/cmd/todo/main.go
+new file mode 100644
+index 0000000..07273ee
+--- /dev/null
++++ b/cmd/todo/main.go
+@@ -0,0 +1,17 @@
++// Command todo serves the todo API.
++package main
++
++import (
++	"log"
++	"net/http"
++)
++
++func main() {
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
++		w.Write([]byte("ok\n"))
++	})
++
++	log.Printf("listening on :8081")
++	log.Fatal(http.ListenAndServe(":8081", mux))
++}
+diff --git a/go.mod b/go.mod
+new file mode 100644
+index 0000000..8b2552e
+--- /dev/null
++++ b/go.mod
+@@ -0,0 +1,3 @@
++module example.local/todo
++
++go 1.23

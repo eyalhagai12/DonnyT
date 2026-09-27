@@ -1,0 +1,80 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Levi <dan@devstack.local>
+Date: Wed, 16 Sep 2026 11:00:00 +0300
+Subject: [PATCH 08/10] TEAM-8 Graceful shutdown and config from env
+
+---
+ cmd/todo/main.go | 47 +++++++++++++++++++++++++++++++++++++++++++++--
+ 1 file changed, 45 insertions(+), 2 deletions(-)
+
+diff --git a/cmd/todo/main.go b/cmd/todo/main.go
+index 1cd4525..920e630 100644
+--- a/cmd/todo/main.go
++++ b/cmd/todo/main.go
+@@ -1,21 +1,64 @@
+ // Command todo serves the todo API.
++//
++// Configuration comes from the environment:
++//
++//	TODO_ADDR  listen address (default :8081)
+ package main
+ 
+ import (
++	"context"
++	"errors"
+ 	"log"
+ 	"net/http"
++	"os"
++	"os/signal"
++	"syscall"
++	"time"
+ 
+ 	"example.local/todo/internal/httpx"
+ 	"example.local/todo/internal/todo"
+ )
+ 
++// shutdownGrace is how long in-flight requests get to finish on SIGTERM.
++const shutdownGrace = 10 * time.Second
++
+ func main() {
++	addr := env("TODO_ADDR", ":8081")
++
+ 	mux := http.NewServeMux()
+ 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
+ 		w.Write([]byte("ok\n"))
+ 	})
+ 	todo.NewHandler(todo.NewStore()).Register(mux)
+ 
+-	log.Printf("listening on :8081")
+-	log.Fatal(http.ListenAndServe(":8081", httpx.Log(log.Default(), mux)))
++	srv := &http.Server{
++		Addr:              addr,
++		Handler:           httpx.Log(log.Default(), mux),
++		ReadHeaderTimeout: 5 * time.Second,
++	}
++
++	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
++	defer stop()
++
++	go func() {
++		log.Printf("listening on %s", addr)
++		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
++			log.Fatal(err)
++		}
++	}()
++
++	<-ctx.Done()
++	log.Printf("shutting down")
++	shutdown, cancel := context.WithTimeout(context.Background(), shutdownGrace)
++	defer cancel()
++	if err := srv.Shutdown(shutdown); err != nil {
++		log.Printf("shutdown: %v", err)
++	}
++}
++
++func env(key, fallback string) string {
++	if v := os.Getenv(key); v != "" {
++		return v
++	}
++	return fallback
+ }

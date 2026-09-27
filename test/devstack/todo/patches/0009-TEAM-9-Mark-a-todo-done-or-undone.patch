@@ -1,0 +1,69 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Maya Cohen <maya@devstack.local>
+Date: Mon, 21 Sep 2026 11:00:00 +0300
+Subject: [PATCH 09/10] TEAM-9 Mark a todo done or undone
+
+---
+ internal/todo/handler.go      |  5 +++++
+ internal/todo/handler_test.go | 28 ++++++++++++++++++++++++++++
+ 2 files changed, 33 insertions(+)
+
+diff --git a/internal/todo/handler.go b/internal/todo/handler.go
+index d8d5e9b..89717d6 100644
+--- a/internal/todo/handler.go
++++ b/internal/todo/handler.go
+@@ -62,6 +62,8 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
+ 
+ type updateRequest struct {
+ 	Title string `json:"title"`
++	// Done is a pointer so that leaving it out keeps the current state.
++	Done *bool `json:"done"`
+ }
+ 
+ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+@@ -75,6 +77,9 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
+ 	}
+ 	t, err := h.store.Update(id, func(t *Todo) {
+ 		t.Title = strings.TrimSpace(req.Title)
++		if req.Done != nil {
++			t.Done = *req.Done
++		}
+ 	})
+ 	if err != nil {
+ 		h.storeError(w, err)
+diff --git a/internal/todo/handler_test.go b/internal/todo/handler_test.go
+index 55ce69a..2ee5e5d 100644
+--- a/internal/todo/handler_test.go
++++ b/internal/todo/handler_test.go
+@@ -140,3 +140,31 @@ func TestHandlerDelete(t *testing.T) {
+ 		t.Errorf("second delete status = %d; want 404", rec.Code)
+ 	}
+ }
++
++func TestHandlerMarkDone(t *testing.T) {
++	store := NewStore()
++	store.Create("buy milk")
++	h := NewHandler(store)
++
++	rec := serve(t, h, "PATCH", "/todos/1", `{"title": "buy milk", "done": true}`)
++	if got := decodeBody[Todo](t, rec); !got.Done {
++		t.Fatalf("done = false after marking done; body %s", rec.Body)
++	}
++
++	rec = serve(t, h, "PATCH", "/todos/1", `{"title": "buy milk", "done": false}`)
++	if got := decodeBody[Todo](t, rec); got.Done {
++		t.Error("done = true after marking undone")
++	}
++}
++
++func TestHandlerUpdateWithoutDoneKeepsIt(t *testing.T) {
++	store := NewStore()
++	created := store.Create("buy milk")
++	store.Update(created.ID, func(t *Todo) { t.Done = true })
++	h := NewHandler(store)
++
++	rec := serve(t, h, "PATCH", "/todos/1", `{"title": "buy oat milk"}`)
++	if got := decodeBody[Todo](t, rec); !got.Done {
++		t.Error("renaming a todo un-did it")
++	}
++}

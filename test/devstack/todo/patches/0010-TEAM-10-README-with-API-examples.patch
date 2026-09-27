@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tamar Adler <tamar@devstack.local>
+Date: Wed, 23 Sep 2026 11:00:00 +0300
+Subject: [PATCH 10/10] TEAM-10 README with API examples
+
+---
+ README.md | 40 ++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 40 insertions(+)
+ create mode 100644 README.md
+
+diff --git a/README.md b/README.md
+new file mode 100644
+index 0000000..bf51b48
+--- /dev/null
++++ b/README.md
+@@ -0,0 +1,40 @@
++# todo
++
++A small todo-list API. Go standard library only, todos kept in memory.
++
++## Run
++
++```bash
++go run ./cmd/todo                 # listens on :8081
++TODO_ADDR=:9000 go run ./cmd/todo # somewhere else
++go test ./...
++```
++
++## API
++
++| Method | Path | Body | Returns |
++| --- | --- | --- | --- |
++| `GET` | `/healthz` | | `ok` |
++| `GET` | `/todos` | | every todo |
++| `POST` | `/todos` | `{"title": "..."}` | the new todo, `201` |
++| `GET` | `/todos/{id}` | | one todo |
++| `PATCH` | `/todos/{id}` | `{"title": "...", "done": true}` | the updated todo |
++| `DELETE` | `/todos/{id}` | | `204` |
++
++Errors come back as `{"error": "..."}` with a 4xx status. Titles are required
++and at most 200 characters.
++
++```bash
++curl -s localhost:8081/todos -d '{"title": "buy milk"}'
++curl -s localhost:8081/todos
++curl -s -X PATCH localhost:8081/todos/1 -d '{"title": "buy milk", "done": true}'
++curl -s -X DELETE localhost:8081/todos/1
++```
++
++## Layout
++
++```
++cmd/todo/          main: config, wiring, graceful shutdown
++internal/todo/     the model, the in-memory store and the HTTP handlers
++internal/httpx/    middleware (request logging)
++```

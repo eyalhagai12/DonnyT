@@ -43,28 +43,44 @@ After 30 days the licences expire and Jira and Confluence go read-only. Either
 paste a fresh evaluation licence in admin → licensing, or `docker compose down -v`
 and start over.
 
-## 3. Create what DonnyT needs
+## 3. Tokens
 
-**Jira** (as admin)
-- Create a **Scrum** project with key `TEAM`. Note the board id in the board
-  URL (`rapidView=1` or `/boards/1`).
-- Add a few issues with story points, run 3–4 sprints and close them — leave one
-  issue unfinished so it spills over.
-- Profile → **Personal Access Tokens** → create one.
+Three admin tokens; `seed.py` creates everything else with them.
 
-**Confluence** (as admin)
-- Create a space with key `ENG`, and a page copying your MR template's
-  *structure* (headings, tables, checklists, the same macros) with made-up text.
-  Note its id: **⋯ → Page Information**, `pageId=` in the URL.
-- Profile → **Personal Access Tokens** → create one. It is separate from Jira's.
+- **Jira**: Profile → **Personal Access Tokens** → create one.
+- **Confluence**: Profile → **Personal Access Tokens** → create one. It is
+  separate from Jira's.
+- **GitLab** (as root): Avatar → **Edit profile** → **Access tokens** →
+  scopes `api`, `read_repository`, `write_repository`. It must be an admin's:
+  the seed creates users and tokens for the team.
 
-**GitLab** (as root)
-- Create a project, e.g. `team/api`, and push a branch like `TEAM-1-something`.
-- Avatar → **Edit profile** → **Access tokens** → scopes `api`, `read_repository`.
+Put them in `test/devstack/donnyt/.env` (git-ignored, like everything under
+`donnyt/`):
 
-## 4. Point DonnyT at it
+```ini
+JIRA_PAT=...
+CONFLUENCE_PAT=...
+GITLAB_TOKEN=glpat-...
+```
 
-`config.toml`:
+## 4. Seed the team
+
+```bash
+python test/devstack/seed.py            # everything; safe to re-run, resets to the same state
+python test/devstack/seed.py jira vault # or just some of it
+```
+
+It builds a small team making a **todo API in Go** (`todo/`), and resets:
+
+| Where | What |
+| --- | --- |
+| GitLab `team/todo` | `main` = v0, one commit per ticket by its author (`todo/patches/`); a user and token per team member; no MRs or branches |
+| Jira `TEAM` | 3 closed sprints that built v0, one spill-over, nothing estimated; 16 backlog features and bugs of deliberately mixed size |
+| Confluence `ENG` | the PRD template, parent pages for plans and PRDs |
+| `donnyt/vault` | a person note with role and Focus per member, the repo's templates, no sprint notes |
+| `donnyt/config.toml` | board, fields, pages, `team/todo`, the roster, a Sun–Thu week |
+
+`donnyt/config.toml` needs the addresses once; the seed fills in the rest:
 
 ```toml
 [atlassian]
@@ -74,28 +90,25 @@ deployment = "datacenter"
 
 [confluence]
 space = "ENG"
-mr_template_page_id = "<page id>"
-prd_template_page_id = "<page id>"
 
 [jira]
 project_key = "TEAM"
-board_id = <board id>
-story_points_field = "customfield_10106"   # doctor tells you the right one
+board_id = 0
 
 [gitlab]
 url = "http://localhost:8929"
-default_project = "team/api"
+
+[vault]
+path = "vault"
 ```
 
-`.env`:
+Point DonnyT at it with `DONNYT_HOME=test/devstack/donnyt`, then
+`python -m donnyt.cli doctor`.
 
-```ini
-JIRA_PAT=...
-CONFLUENCE_PAT=...
-GITLAB_TOKEN=glpat-...
-```
+## 5. Run a sprint
 
-Then `python -m donnyt.cli doctor` and work through `INTERNAL_SETUP.md`.
+[SIMULATION.md](SIMULATION.md): plan a sprint from a brief with DonnyT, then
+play the team through it with `team.py` -- real code, real MRs, real spill-over.
 
 ## Stopping
 

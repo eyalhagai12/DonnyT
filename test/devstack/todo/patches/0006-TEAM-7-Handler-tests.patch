@@ -1,0 +1,107 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Tamar Adler <tamar@devstack.local>
+Date: Tue, 8 Sep 2026 11:00:00 +0300
+Subject: [PATCH 06/10] TEAM-7 Handler tests
+
+---
+ internal/todo/handler_test.go | 91 +++++++++++++++++++++++++++++++++++
+ 1 file changed, 91 insertions(+)
+ create mode 100644 internal/todo/handler_test.go
+
+diff --git a/internal/todo/handler_test.go b/internal/todo/handler_test.go
+new file mode 100644
+index 0000000..6f4fc31
+--- /dev/null
++++ b/internal/todo/handler_test.go
+@@ -0,0 +1,91 @@
++package todo
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"strings"
++	"testing"
++)
++
++// serve runs one request against a fresh API and returns the response.
++func serve(t *testing.T, h *Handler, method, path, body string) *httptest.ResponseRecorder {
++	t.Helper()
++	mux := http.NewServeMux()
++	h.Register(mux)
++	rec := httptest.NewRecorder()
++	mux.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
++	return rec
++}
++
++func decodeBody[T any](t *testing.T, rec *httptest.ResponseRecorder) T {
++	t.Helper()
++	var v T
++	if err := json.NewDecoder(rec.Body).Decode(&v); err != nil {
++		t.Fatalf("decoding %q: %v", rec.Body.String(), err)
++	}
++	return v
++}
++
++func TestHandlerCreate(t *testing.T) {
++	h := NewHandler(NewStore())
++
++	rec := serve(t, h, "POST", "/todos", `{"title": "buy milk"}`)
++
++	if rec.Code != http.StatusCreated {
++		t.Fatalf("status = %d; want 201. body: %s", rec.Code, rec.Body)
++	}
++	got := decodeBody[Todo](t, rec)
++	if got.ID != 1 || got.Title != "buy milk" || got.Done {
++		t.Errorf("created %+v; want id 1, title %q, not done", got, "buy milk")
++	}
++}
++
++func TestHandlerCreateRejectsBadInput(t *testing.T) {
++	tests := []struct {
++		name   string
++		body   string
++		status int
++	}{
++		{"not JSON", `buy milk`, http.StatusBadRequest},
++		{"missing title", `{}`, http.StatusBadRequest},
++		{"blank title", `{"title": "  "}`, http.StatusBadRequest},
++		{"unknown field", `{"title": "a", "colour": "red"}`, http.StatusBadRequest},
++		{"title too long", `{"title": "` + strings.Repeat("a", maxTitle+1) + `"}`, http.StatusBadRequest},
++	}
++	for _, tt := range tests {
++		t.Run(tt.name, func(t *testing.T) {
++			rec := serve(t, NewHandler(NewStore()), "POST", "/todos", tt.body)
++			if rec.Code != tt.status {
++				t.Fatalf("status = %d; want %d", rec.Code, tt.status)
++			}
++			if got := decodeBody[errorBody](t, rec); got.Error == "" {
++				t.Error("error body has no message")
++			}
++		})
++	}
++}
++
++func TestHandlerList(t *testing.T) {
++	store := NewStore()
++	store.Create("buy milk")
++	h := NewHandler(store)
++
++	rec := serve(t, h, "GET", "/todos", "")
++
++	if rec.Code != http.StatusOK {
++		t.Fatalf("status = %d; want 200", rec.Code)
++	}
++	got := decodeBody[[]Todo](t, rec)
++	if len(got) != 1 || got[0].Title != "buy milk" {
++		t.Errorf("list = %+v; want one todo, %q", got, "buy milk")
++	}
++}
++
++func TestHandlerListEmptyIsAnArray(t *testing.T) {
++	rec := serve(t, NewHandler(NewStore()), "GET", "/todos", "")
++
++	if body := strings.TrimSpace(rec.Body.String()); body != "[]" {
++		t.Errorf("body = %s; want []", body)
++	}
++}
