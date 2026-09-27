@@ -32,10 +32,21 @@ import time
 from pathlib import Path
 
 from seed import (
-    GITLAB_WEB, HERE, JIRA, KEY, NAMES, PROJECT, TOKENS, call, env, git, ok, project_url,
+    GITLAB_WEB, HERE, JIRA, KEY, NAMES, PROJECT, REPOS, TOKENS, call, env, git, ok, project_url,
 )
 
-WORK = HERE / "donnyt" / "work" / "todo"
+# The repo being worked in: team/todo unless --repo says otherwise. Each has
+# its own working copy under donnyt/work/, named after the project.
+REPO = PROJECT
+WORK = HERE / "donnyt" / "work" / PROJECT.split("/")[-1]
+
+
+def use_repo(project: str) -> None:
+    global REPO, WORK
+    known = [r for r, *_ in REPOS]
+    if project not in known:
+        raise SystemExit(f"{project!r} is not a devstack repo: {', '.join(known)}")
+    REPO, WORK = project, HERE / "donnyt" / "work" / project.split("/")[-1]
 
 
 def token(login: str) -> str:
@@ -47,14 +58,14 @@ def token(login: str) -> str:
 
 
 def gitlab(login: str, method: str, path: str, body: object = None) -> object:
-    return ok(call(method, project_url() + path, {"PRIVATE-TOKEN": token(login)}, body),
+    return ok(call(method, project_url(REPO) + path, {"PRIVATE-TOKEN": token(login)}, body),
               f"{method} {path} as {login}")
 
 
 def remote(login: str | None = None) -> str:
     """The repo URL with a token in it: the person's, or the admin's for reading."""
     secret = token(login) if login else env("GITLAB_TOKEN")
-    return f"http://{login or 'root'}:{secret}@{GITLAB_WEB.removeprefix('http://')}/{PROJECT}.git"
+    return f"http://{login or 'root'}:{secret}@{GITLAB_WEB.removeprefix('http://')}/{REPO}.git"
 
 
 def jira(method: str, path: str, body: object = None) -> object:
@@ -235,7 +246,10 @@ def main(argv: list[str] | None = None) -> int:
     new.add_argument("--description", default="")
     new.add_argument("--assign", default="", choices=["", *NAMES])
 
+    parser.add_argument("--repo", default=PROJECT,
+                        help=f"GitLab project to work in (default {PROJECT}); put it before the command.")
     args = parser.parse_args(argv)
+    use_repo(args.repo)
     handler = globals()["cmd_" + args.command.replace("-", "_")]
     handler(args)
     return 0

@@ -33,6 +33,7 @@ class Issue:
     points: float | None
     priority: str
     labels: list[str] = field(default_factory=list)
+    components: list[str] = field(default_factory=list)
     parent: str = ""
     url: str = ""
     description: str = ""  # only when the issue was fetched on its own
@@ -48,6 +49,7 @@ class Issue:
             "points": self.points,
             "priority": self.priority,
             "labels": self.labels,
+            "components": self.components,
             "parent": self.parent,
             "url": self.url,
             **extra,
@@ -74,6 +76,20 @@ def adf_text(node: Any) -> str:
     if kind in ("paragraph", "heading", "codeBlock", "blockquote", "rule"):
         return inner.strip() + "\n\n"
     return inner
+
+
+def adf_doc(text: str) -> dict[str, Any]:
+    """Plain text as an Atlassian Document Format tree: one paragraph per
+    blank-line-separated block. Cloud's v3 API accepts nothing else."""
+    blocks = [b for b in text.split("\n\n") if b.strip()]
+    return {
+        "type": "doc",
+        "version": 1,
+        "content": [
+            {"type": "paragraph", "content": [{"type": "text", "text": b.strip()}]}
+            for b in blocks
+        ],
+    }
 
 
 @dataclass
@@ -122,17 +138,20 @@ class JiraClient:
         return self._epic_field
 
     def _issue_fields(self) -> list[str]:
-        base = ["summary", "status", "issuetype", "assignee", "priority", "labels", "parent", self.points_field]
+        base = [
+            "summary", "status", "issuetype", "assignee", "priority", "labels", "components",
+            "parent", self.points_field,
+        ]
         return base + [self.epic_field] if self.epic_field else base
 
     # -- issues ------------------------------------------------------------
-    def search(self, jql: str, limit: int = 100) -> list[Issue]:
+    def search(self, jql: str, limit: int = 100, extra_fields: list[str] | None = None) -> list[Issue]:
         """Run JQL, paging until ``limit``.
 
         Cloud retired offset paging in favour of ``/search/jql`` with page
         tokens; Data Center only has the offset form. Same results either way.
         """
-        fields = self._issue_fields()
+        fields = self._issue_fields() + (extra_fields or [])
         issues: list[Issue] = []
         next_token: str | None = None
 
@@ -279,6 +298,42 @@ class JiraClient:
         if end is not None:
             payload["endDate"] = end
         return self._to_sprint(self.http.post(f"/rest/agile/1.0/sprint/{sprint_id}", json_body=payload))
+
+    def set_estimate(self, key: str, points: float, board_id: int | None = None) -> None:
+        """Set an issue's estimate through the board.
+
+        The agile estimation endpoint writes to whatever field the board
+        estimates with, whether or not that field is on the issue's screen --
+        Bugs and Tasks often lack Story Points there. Same on Cloud and Data Center.
+        """
+        board = board_id or self.config.jira_board_id
+        value = int(points) if float(points).is_integer() else points
+        self.http.put(
+            f"/rest/agile/1.0/issue/{key}/estimation",
+            params={"boardId": board},
+            json_body={"value": str(value)},
+        )
+
+    def add_comment(self, key: str, text: str) -> None:
+        """Comment on an issue: plain text on Data Center, a document on Cloud."""
+        body: Any = adf_doc(text) if self.cloud else text
+        self.http.post(f"{self.api}/issue/{key}/comment", json_body={"body": body})
+
+    def done_like(self, components: list[str], labels: list[str], limit: int = 50) -> list[Issue]:
+        """Finished issues in the project that share a component or a label.
+
+        With neither to match on, the project's finished issues. Descriptions
+        are included: similarity is judged on words, not only the summary.
+        """
+        clauses = []
+        if components:
+            clauses.append("component in (" + ", ".join(f'"{c}"' for c in components) + ")")
+        if labels:
+            clauses.append("labels in (" + ", ".join(f'"{l}"' for l in labels) + ")")
+        match = f" AND ({' OR '.join(clauses)})" if clauses else ""
+        jql = (f"project = {self.config.jira_project_key} AND statusCategory = Done{match} "
+               "ORDER BY resolved DESC")
+        return self.search(jql, limit=limit, extra_fields=["description"])
 
     def assign(self, key: str, user: str | None) -> None:
         """Assign an issue, or unassign it when ``user`` is None.
@@ -430,6 +485,7 @@ class JiraClient:
             points=float(points) if isinstance(points, (int, float)) else None,
             priority=((fields.get("priority") or {}).get("name", "")),
             labels=list(fields.get("labels") or []),
+            components=[c.get("name", "") for c in fields.get("components") or [] if c.get("name")],
             parent=parent.get("key", "") or (epic if isinstance(epic, str) else ""),
             url=f"{self.site}/browse/{raw.get('key', '')}",
             description=adf_text(fields.get("description")).strip(),

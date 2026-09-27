@@ -44,6 +44,11 @@ _STATUS = {"future": "planned", "active": "active", "closed": "closed"}
 _BRIEF_SECTIONS = ("vectors", "availability", "on call", "room", "must include", "keep out", "notes")
 
 
+def _mr_ref(mr: MergeRequest) -> str:
+    """``team/todo!5``: MR numbers repeat across repos, so the repo is part of the name."""
+    return f"{mr.project}!{mr.iid}" if mr.project else f"!{mr.iid}"
+
+
 def working_days(start: str, end: str, weekend: list[str]) -> int | None:
     """Working days from ``start`` to ``end`` inclusive, or None if the dates don't parse."""
     try:
@@ -183,12 +188,12 @@ class GraphBuilder:
                     f"Finished [{issue.key}]({issue.url}) {issue.summary}")
         for mr, approvers in merged or []:
             author = self._person(mr.author)
-            work.setdefault(author, []).append(f"Merged [!{mr.iid}]({mr.url}) {mr.title}")
+            work.setdefault(author, []).append(f"Merged [{_mr_ref(mr)}]({mr.url}) {mr.title}")
             for login in approvers:
                 reviewer = self._person(login)
                 if reviewer != author:
                     work.setdefault(reviewer, []).append(
-                        f"Reviewed [!{mr.iid}]({mr.url}) {mr.title} — for {author}")
+                        f"Reviewed [{_mr_ref(mr)}]({mr.url}) {mr.title} — for {author}")
         if not work:
             return "_Nothing finished yet._"
 
@@ -205,14 +210,19 @@ class GraphBuilder:
         return "\n\n".join(sections) + note
 
     def merged_work(self, sprint: Sprint) -> list[tuple[MergeRequest, list[str]]] | None:
-        """MRs merged during the sprint, each with its approvers. None when GitLab
-        is not configured or not reachable: the sprint note is still worth writing."""
-        if not (self.config.gitlab_default_project and sprint.start):
+        """MRs merged during the sprint in every configured repo, each with its
+        approvers, oldest first. None when GitLab is not configured or not
+        reachable: the sprint note is still worth writing without it."""
+        if not (self.config.repos and sprint.start):
             return None
         try:
             gitlab = GitLabClient(self.config)
-            merged = gitlab.merged_between(sprint.start, sprint.end or "9999-12-31")
-            return [(mr, gitlab.approvers(mr.iid)) for mr in merged]
+            merged = [
+                (mr, gitlab.approvers(mr.iid, repo.project))
+                for repo in self.config.repos
+                for mr in gitlab.merged_between(sprint.start, sprint.end or "9999-12-31", repo.project)
+            ]
+            return sorted(merged, key=lambda pair: pair[0].merged_at)
         except Exception:
             return None
 

@@ -11,8 +11,9 @@ A team-lead toolkit for Claude Code. Three jobs:
 3. **Remember all of it** in an Obsidian knowledge graph, so last quarter stays
    answerable.
 
-GitLab is read-only: history now, and the raw material for estimating new work
-from what similar work touched.
+GitLab is read-only, across as many repos as the team works in: each repo is
+mapped to the Jira components or labels whose tickets touch it. That history
+credits who did what, and is the evidence estimates rest on.
 
 Built to run on an **airtight internal network** — no package index, no public
 internet. See **[INSTALL.md](INSTALL.md)**.
@@ -44,13 +45,14 @@ and your Confluence templates never leaving that network:
 
 ## Using it
 
-Four skills, invoked in Claude Code:
+Five skills, invoked in Claude Code:
 
 | Skill | What it does |
 | --- | --- |
 | `/prd-write` | Turns a problem statement and a proposed solution into a PRD from the Confluence template: user flows, screens, edge cases and ticket-sized requirements. Asks about gaps instead of inventing them, publishes a draft. Runs before tickets exist; it never creates them. |
 | `/ui-mock` | Mockups in the style of your own system: learns the look from screenshots or by capturing the running app, draws each screen as HTML, renders it to PNG with the installed Edge/Chrome. `/prd-write` uses it for the Mockups section. |
-| `/sprint-plan` | Reads your sprint brief (`vault/Sprints/<name>.md`), then selects by goal, sizes by availability, assigns by each person's Focus. Works with unestimated issues. Presents the plan for review, then creates the sprint in Jira. || `/vault-sync` | Keeps the graph current; answers questions about team history; preps 1:1s. |
+| `/sprint-plan` | Reads your sprint brief (`vault/Sprints/<name>.md`), then selects by goal, sizes by availability, assigns by each person's Focus. Works with unestimated issues. Presents the plan for review, then creates the sprint in Jira. || `/estimate` | Sizes issues (XS–XL, as story points) from what similar past work really changed, across every repo the ticket's Jira components map to. Proposes; writes to Jira only after you approve. |
+| `/vault-sync` | Keeps the graph current; answers questions about team history; preps 1:1s. |
 
 They also trigger on plain language — "plan the sprint from the brief", "what
 should go in the next sprint", "what has Maya been working on".
@@ -77,7 +79,8 @@ src/donnyt/
   config.py       .env + config.toml
   confluence.py   pages, CQL search, the PRD template (Cloud + Data Center)
   jira.py         issues, boards, sprints, velocity, workload (Cloud + Data Center)
-  gitlab.py       read-only: merged work and its reviewers
+  gitlab.py       read-only, per repo: merged work, reviewers, what a ticket changed
+  estimate.py     evidence for estimates: similar past work, per repo
   vault.py        Obsidian notes, frontmatter, links, managed blocks
   graph.py        turns Jira/GitLab facts into linked notes
   ops.py          every operation, once -- both front ends call it
@@ -86,7 +89,7 @@ src/donnyt/
   cli.py          the same tools, from a terminal (`donnyt tools` maps them)
   doctor.py       preflight checks
 
-.claude/skills/   sprint-plan, vault-sync, prd-write, ui-mock
+.claude/skills/   sprint-plan, estimate, vault-sync, prd-write, ui-mock
 vault/            the knowledge graph (plain Markdown)
 vendor/wheels/    offline install bundle
 ```

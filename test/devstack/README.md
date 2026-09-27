@@ -74,11 +74,13 @@ It builds a small team making a **todo API in Go** (`todo/`), and resets:
 
 | Where | What |
 | --- | --- |
-| GitLab `team/todo` | `main` = v0, one commit per ticket by its author (`todo/patches/`); a user and token per team member; no MRs or branches |
-| Jira `TEAM` | 3 closed sprints that built v0, one spill-over, nothing estimated; 16 backlog features and bugs of deliberately mixed size |
+| GitLab `team/todo` | the API: `main` = v0, one commit per ticket by its author (`todo/patches/`); no MRs or branches |
+| GitLab `team/todo-cli` | a command-line client for it: v0 is TEAM-27 and 28 (`todo-cli/patches/`) |
+| GitLab users | one per team member, each with a token for `team.py` |
+| Jira `TEAM` | 3 closed sprints that built v0, one spill-over, nothing estimated; components `api` and `cli` mapping tickets to the two repos; 18 backlog features and bugs of deliberately mixed size, one touching both repos |
 | Confluence `ENG` | the PRD template, parent pages for plans and PRDs |
 | `donnyt/vault` | a person note with role and Focus per member, the repo's templates, no sprint notes |
-| `donnyt/config.toml` | board, fields, pages, `team/todo`, the roster, a Sun–Thu week |
+| `donnyt/config.toml` | board, fields, pages, both repos as `[[gitlab.repos]]`, the roster, a Sun–Thu week |
 
 `donnyt/config.toml` needs the addresses once; the seed fills in the rest:
 

@@ -146,13 +146,14 @@ class DoneBy(unittest.TestCase):
         """One person is one note: `lior` in GitLab is `Lior Ben-David` in Jira."""
         done = [Issue("TEAM-11", "Random order", "Done", "Bug", "Lior Ben-David", None, "Medium",
                       url="http://jira/TEAM-11")]
-        mr = MergeRequest(2, "TEAM-11 Oldest first", "merged", "b", "main", "lior", "http://gl/2")
+        mr = MergeRequest(2, "TEAM-11 Oldest first", "merged", "b", "main", "lior", "http://gl/2",
+                          project="team/todo")
         text = self.builder._done_by(done, [(mr, ["maya", "lior"])])
 
         self.assertIn("### [[Lior Ben-David]]", text)
         self.assertIn("### [[Maya Cohen]]", text)
         self.assertNotIn("[[lior]]", text)
-        self.assertIn("Reviewed [!2](http://gl/2) TEAM-11 Oldest first — for Lior Ben-David", text)
+        self.assertIn("Reviewed [team/todo!2](http://gl/2) TEAM-11 Oldest first — for Lior Ben-David", text)
         # An author approving their own MR is not a review.
         self.assertEqual(text.count("Reviewed"), 1)
 

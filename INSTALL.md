@@ -64,7 +64,7 @@ Collect these before step 5; each is visible in a URL.
 | `confluence.prd_template_page_id` | Optional, for `/prd-write`. Cloud page URL: `/pages/`**`123456790`**`/PRD+Template`. Data Center: **⋯ → Page Information**, the `pageId=` in the URL | `123456790` |
 | `jira.project_key` | The prefix on any issue: **`TEAM`**`-1234` | `TEAM` |
 | `jira.board_id` | Board URL: `/boards/`**`42`** | `42` |
-| `gitlab.default_project` | The path after the host | `platform/backend/api` |
+| `gitlab.default_project` | One repo: the path after the host. Several: list them as `[[gitlab.repos]]` instead (step 5) | `platform/backend/api` |
 
 If you get `jira.board_id` wrong, `donnyt doctor` lists the valid ids for you.
 
@@ -298,6 +298,24 @@ board_id = 42
 url = "https://gitlab.internal.corp"
 default_project = "platform/backend/api"
 ```
+
+**The team works in several repos?** List each one, with the Jira components
+or labels whose tickets touch it. A ticket's components then decide which
+repos `/estimate` reads, and every repo's merged work counts in "Done by":
+
+```toml
+[[gitlab.repos]]
+project = "platform/backend/api"
+jira = ["api", "backend"]        # Jira components or labels; leave it out = every ticket
+
+[[gitlab.repos]]
+project = "platform/web"
+jira = ["web"]
+```
+
+`doctor` checks it can read every repo, and names any Jira component that no
+repo claims — tickets with only those components get "which repos?" asked
+about them instead of guessed.
 
 **Data Center with Confluence on its own host or path?** Add:
 

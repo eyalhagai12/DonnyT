@@ -251,6 +251,12 @@ python -m donnyt.cli mrs --state merged --limit 5
 **Expect:** the last few merged MRs (possibly an empty list), with no error.
 DonnyT only reads GitLab: this is where each sprint's "Done by" comes from.
 
+With several repos in `[[gitlab.repos]]`, check each one
+(`mrs --state merged --project group/repo`), and check `doctor`'s `gitlab`
+line lists every repo with its Jira components and names no unmapped
+component. An unmapped component is not an error, but its tickets will get
+"which repos?" asked about them when estimating.
+
 **If this fails:** `doctor`'s `gitlab` line names the problem — usually
 `gitlab.default_project` in `config.toml` not matching the exact
 `group/subgroup/repo` path, or the token missing the `read_api` scope.

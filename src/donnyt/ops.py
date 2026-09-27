@@ -217,13 +217,54 @@ def jira_assign(issue_keys: list[str], assignee: str) -> dict[str, Any]:
 # ------------------------------------------------------------------- gitlab
 
 
-def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30) -> list[dict[str, Any]]:
+def gitlab_list_mrs(
+    state: str = "opened", author: str = "", limit: int = 30, project: str = ""
+) -> list[dict[str, Any]]:
     from .gitlab import GitLabClient
 
     return [
         mr.as_dict()
-        for mr in GitLabClient().list_merge_requests(state=state, author=author or None, limit=limit)
+        for mr in GitLabClient().list_merge_requests(
+            project=project or None, state=state, author=author or None, limit=limit
+        )
     ]
+
+
+# --------------------------------------------------------------- estimation
+
+
+def estimation_context(issue_keys: list[str], similar: int = 5) -> dict[str, Any]:
+    from .estimate import context
+
+    if not issue_keys:
+        raise OpError("no_issues", "Give at least one issue key to estimate.")
+    return context(issue_keys, similar=similar)
+
+
+def jira_set_estimate(key: str, size: str, reasoning: str) -> dict[str, Any]:
+    from .estimate import size_points
+    from .jira import JiraClient
+
+    jira = JiraClient()
+    sizes = jira.config.estimation_sizes
+    try:
+        points = size_points(size, sizes)
+    except ValueError as exc:
+        raise OpError("unknown_size", f"{exc} (estimation.sizes in config.toml).") from None
+    if not reasoning.strip():
+        raise OpError("no_reasoning", "Give the reasoning: it is what makes an estimate reviewable.")
+
+    try:
+        jira.set_estimate(key, points)
+    except Exception as exc:
+        raise OpError(
+            "estimate_not_written",
+            f"Jira refused the estimate for {key}: {exc}. The board ({jira.config.jira_board_id}) "
+            "must estimate with Story Points: board settings -> Estimation.",
+        ) from None
+    label = size.strip().upper()
+    jira.add_comment(key, f"Estimate: {label} ({points:g} points) — {reasoning.strip()}")
+    return {"key": key, "size": label, "points": points}
 
 
 # -------------------------------------------------------------------- vault

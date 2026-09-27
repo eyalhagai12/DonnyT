@@ -36,11 +36,17 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ENV = HERE / "donnyt" / ".env"
 TOKENS = HERE / "donnyt" / "team-tokens.json"
-PATCHES = HERE / "todo" / "patches"
 
 GITLAB_WEB = "http://127.0.0.1:8929"
 GITLAB = f"{GITLAB_WEB}/api/v4"
-PROJECT = "team/todo"
+PROJECT = "team/todo"  # the API; team.py's default repo
+
+# The team's repos: GitLab project, its v0 as a patch series (one patch per
+# ticket, authored and dated), and the Jira components whose tickets touch it.
+REPOS = [
+    ("team/todo", HERE / "todo" / "patches", ["api"]),
+    ("team/todo-cli", HERE / "todo-cli" / "patches", ["cli"]),
+]
 
 # (login, display name, role, focus). The login is the Jira username
 # and the GitLab username; the display name must match Jira's exactly.
@@ -123,8 +129,58 @@ def gitlab_admin() -> tuple[dict[str, str], str]:
     return {"PRIVATE-TOKEN": token}, token
 
 
-def project_url() -> str:
-    return f"{GITLAB}/projects/{urllib.parse.quote(PROJECT, safe='')}"
+def project_url(project: str = PROJECT) -> str:
+    return f"{GITLAB}/projects/{urllib.parse.quote(project, safe='')}"
+
+
+def reset_repo(project_path: str, patches: Path, users: dict[str, int],
+               auth: dict[str, str], root_token: str) -> None:
+    """Create the project if needed, then put it back to v0: no MRs, no branches
+    but main, and main replayed from the patch series."""
+    api = lambda method, path, body=None: call(method, GITLAB + path, auth, body)  # noqa: E731
+    project = project_url(project_path)
+    if call("GET", project, auth)[0] != 200:
+        group, name = project_path.split("/")
+        status, found = api("GET", f"/groups/{group}")
+        if status != 200:
+            found = ok(api("POST", "/groups", {"name": group, "path": group, "visibility": "private"}),
+                       "create group")
+        ok(api("POST", "/projects", {"name": name, "path": name, "namespace_id": found["id"]}),
+           f"create project {project_path}")
+        print(f"  created project {project_path}")
+    for uid in users.values():
+        call("POST", f"{project}/members", auth, {"user_id": uid, "access_level": 30})  # 409 if already in
+
+    # Start clean: no open or old MRs, no branches but main.
+    mrs = ok(call("GET", f"{project}/merge_requests?state=all&per_page=100", auth), "list MRs")
+    for mr in mrs:
+        call("DELETE", f"{project}/merge_requests/{mr['iid']}", auth)
+    branches = ok(call("GET", f"{project}/repository/branches?per_page=100", auth), "list branches")
+    for branch in branches if isinstance(branches, list) else []:
+        if branch["name"] != "main":
+            call("DELETE", f"{project}/repository/branches/{urllib.parse.quote(branch['name'], safe='')}", auth)
+
+    # Replay v0: one commit per ticket, committed as its author on its date.
+    series = sorted(patches.glob("*.patch"))
+    with tempfile.TemporaryDirectory() as tmp:
+        repo = Path(tmp)
+        git("init", "-q", "-b", "main", cwd=repo)
+        for patch in series:
+            header = patch.read_text(encoding="utf-8").split("\n\n", 1)[0]
+            name, email = re.search(r"^From: (.+?) <(.+?)>$", header, re.M).groups()
+            git("am", "-q", "--committer-date-is-author-date", str(patch), cwd=repo, env_={
+                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
+            })
+        # main is protected; lift it for the force-push, then protect it the
+        # way a team would: merge through MRs, no direct pushes by developers.
+        call("DELETE", f"{project}/protected_branches/main", auth)
+        remote = f"http://root:{root_token}@{GITLAB_WEB.removeprefix('http://')}/{project_path}.git"
+        git("push", "-q", "--force", remote, "main", cwd=repo)
+        ok(call("POST", f"{project}/protected_branches", auth, {
+            "name": "main", "push_access_level": 40, "merge_access_level": 30,
+        }), f"protect main on {project_path}")
+    call("PUT", project, auth, {"default_branch": "main"})
+    print(f"  {project_path} main: {len(series)} commits, one per v0 ticket")
 
 
 def seed_gitlab() -> None:
@@ -143,49 +199,8 @@ def seed_gitlab() -> None:
         users[login] = found[0]["id"]
     print(f"  users: {', '.join(users)}")
 
-    project = project_url()
-    if call("GET", project, auth)[0] != 200:
-        group, name = PROJECT.split("/")
-        status, found = api("GET", f"/groups/{group}")
-        if status != 200:
-            found = ok(api("POST", "/groups", {"name": group, "path": group, "visibility": "private"}),
-                       "create group")
-        ok(api("POST", "/projects", {"name": name, "path": name, "namespace_id": found["id"]}),
-           "create project")
-        print(f"  created project {PROJECT}")
-    for login, uid in users.items():
-        call("POST", f"{project}/members", auth, {"user_id": uid, "access_level": 30})  # 409 if already in
-
-    # Start clean: no open or old MRs, no branches but main.
-    mrs = ok(call("GET", f"{project}/merge_requests?state=all&per_page=100", auth), "list MRs")
-    for mr in mrs:
-        call("DELETE", f"{project}/merge_requests/{mr['iid']}", auth)
-    branches = ok(call("GET", f"{project}/repository/branches?per_page=100", auth), "list branches")
-    for branch in branches if isinstance(branches, list) else []:
-        if branch["name"] != "main":
-            call("DELETE", f"{project}/repository/branches/{urllib.parse.quote(branch['name'], safe='')}", auth)
-
-    # Replay v0: one commit per ticket, committed as its author on its date.
-    patches = sorted(PATCHES.glob("*.patch"))
-    with tempfile.TemporaryDirectory() as tmp:
-        repo = Path(tmp)
-        git("init", "-q", "-b", "main", cwd=repo)
-        for patch in patches:
-            header = patch.read_text(encoding="utf-8").split("\n\n", 1)[0]
-            name, email = re.search(r"^From: (.+?) <(.+?)>$", header, re.M).groups()
-            git("am", "-q", "--committer-date-is-author-date", str(patch), cwd=repo, env_={
-                "GIT_COMMITTER_NAME": name, "GIT_COMMITTER_EMAIL": email,
-            })
-        # main is protected; lift it for the force-push, then protect it the
-        # way a team would: merge through MRs, no direct pushes by developers.
-        call("DELETE", f"{project}/protected_branches/main", auth)
-        remote = f"http://root:{root_token}@{GITLAB_WEB.removeprefix('http://')}/{PROJECT}.git"
-        git("push", "-q", "--force", remote, "main", cwd=repo)
-        ok(call("POST", f"{project}/protected_branches", auth, {
-            "name": "main", "push_access_level": 40, "merge_access_level": 30,
-        }), "protect main")
-    call("PUT", project, auth, {"default_branch": "main"})
-    print(f"  {PROJECT} main: {len(patches)} commits, one per v0 ticket")
+    for project_path, patch_dir, _ in REPOS:
+        reset_repo(project_path, patch_dir, users, auth, root_token)
 
     # A token per person, for team.py to act as them. Old ones are revoked.
     tokens: dict[str, str] = {}
@@ -218,13 +233,14 @@ SPRINTS = [
 
 # (summary, type, assignee, sprints it sat in, sprint finished in -- or its
 # status now, description). Created in order: the first ten are TEAM-1..10 and
-# match the commits in todo/patches. Nothing is estimated -- the team does not
+# match the commits in todo/patches (TEAM-27 and 28: todo-cli/patches). Nothing is estimated -- the team does not
 # use story points. TEAM-4 spills over from Sprint 2 into Sprint 3.
 #
 # The backlog is deliberately uneven, from a one-line fix to a cross-cutting
 # change, so estimation has something to tell apart. TEAM-11 and TEAM-12 are
 # real bugs in v0.
-ISSUES: list[tuple[str, str, str, list[int], int | str, str]] = [
+# An optional seventh field lists the Jira components; the default is the API's.
+ISSUES: list[tuple] = [
     ("Project skeleton and health check", "Task", "dan", [1], 1,
      "Go module, cmd/todo, GET /healthz returning ok."),
     ("Todo model and in-memory store", "Story", "maya", [1], 1,
@@ -281,6 +297,16 @@ ISSUES: list[tuple[str, str, str, list[int], int | str, str]] = [
      "can be swapped in. No behaviour change."),
     ("Users with their own todo lists", "Story", "", [], "To Do",
      "Each API key belongs to a user; todos are scoped to their owner. Another user's todo is a 404."),
+    # -- the command-line client, team/todo-cli: TEAM-27 onwards --
+    ("CLI: list and add todos", "Story", "dan", [3], 3,
+     "todo-cli list and todo-cli add TITLE, against TODO_URL.", ["cli"]),
+    ("CLI: mark done and delete", "Story", "lior", [3], 3,
+     "todo-cli done ID, undone ID and rm ID.", ["cli"]),
+    ("CLI: list with filters", "Story", "", [], "To Do",
+     "todo-cli list --done / --open and --search TEXT, using the API's filters.", ["cli"]),
+    ("Show due dates in the CLI", "Story", "", [], "To Do",
+     "Due dates set and shown from the CLI: the API needs them first (TEAM-16), the CLI shows "
+     "them and flags overdue ones.", ["api", "cli"]),
 ]
 
 
@@ -333,10 +359,17 @@ def seed_jira() -> dict[str, object]:
     points = next((f["id"] for f in fields if f["name"] == "Story Points"), "")
     print(f"  project {KEY}, board {board}, story points field {points or '(none)'}")
 
+    # Components tie tickets to repos ([[gitlab.repos]] maps them).
+    for component in sorted({c for _, _, comps in REPOS for c in comps}):
+        ok(api("POST", "/rest/api/2/component", {"name": component, "project": KEY}),
+           f"create component {component}")
+
     keys: list[str] = []
-    for summary, kind, who, _, _, description in ISSUES:
+    for summary, kind, who, _, _, description, *rest in ISSUES:
+        components = rest[0] if rest else ["api"]
         fields_ = {"project": {"key": KEY}, "summary": summary, "issuetype": {"name": kind},
-                   "description": description}
+                   "description": description,
+                   "components": [{"name": c} for c in components]}
         if who:
             fields_["assignee"] = {"name": who}
         keys.append(ok(api("POST", "/rest/api/2/issue", {"fields": fields_}), f"create {summary!r}")["key"])
@@ -521,13 +554,17 @@ def write_config(jira: dict[str, object] | None, confluence: dict[str, object] |
         nonlocal text
         text = re.sub(rf"(?m)^{key}\s*=.*$", lambda _: f"{key} = {value}", text, count=1)
 
-    setting("default_project", f'"{PROJECT}"')
+    # The repos, and which Jira components touch each: appended after the team.
+    text = re.sub(r"(?m)^default_project = .*\n", "", text)
     # The team, and its week: Sunday to Thursday.
     text = re.sub(r"(?ms)^\[team\]\n.*?(?=^\[)", "", text)
     text = re.sub(r"(?ms)^\[\[team\.members\]\].*", "", text).rstrip() + "\n\n"
     text += '[team]\nweekend = ["Fri", "Sat"]\n\n' + "\n".join(
         f'[[team.members]]\nname = "{display}"\njira = "{login}"\ngitlab = "{login}"\n'
         for login, display, *_ in PEOPLE
+    ) + "\n" + "\n".join(
+        f'[[gitlab.repos]]\nproject = "{project}"\njira = [{", ".join(repr(c).replace(chr(39), chr(34)) for c in comps)}]\n'
+        for project, _, comps in REPOS
     )
     if jira:
         setting("board_id", str(jira["board"]))

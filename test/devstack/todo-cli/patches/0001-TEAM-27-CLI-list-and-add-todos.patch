@@ -1,0 +1,262 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Dan Levi <dan@devstack.local>
+Date: Thu, 17 Sep 2026 11:00:00 +0300
+Subject: [PATCH 1/2] TEAM-27 CLI: list and add todos
+
+---
+ .gitattributes        |  1 +
+ client/client.go      | 81 +++++++++++++++++++++++++++++++++++++++++++
+ client/client_test.go | 63 +++++++++++++++++++++++++++++++++
+ go.mod                |  3 ++
+ main.go               | 66 +++++++++++++++++++++++++++++++++++
+ 5 files changed, 214 insertions(+)
+ create mode 100644 .gitattributes
+ create mode 100644 client/client.go
+ create mode 100644 client/client_test.go
+ create mode 100644 go.mod
+ create mode 100644 main.go
+
+diff --git a/.gitattributes b/.gitattributes
+new file mode 100644
+index 0000000..6313b56
+--- /dev/null
++++ b/.gitattributes
+@@ -0,0 +1 @@
++* text=auto eol=lf
+diff --git a/client/client.go b/client/client.go
+new file mode 100644
+index 0000000..67b8c84
+--- /dev/null
++++ b/client/client.go
+@@ -0,0 +1,81 @@
++// Package client talks to the todo API.
++package client
++
++import (
++	"bytes"
++	"encoding/json"
++	"fmt"
++	"net/http"
++	"strings"
++	"time"
++)
++
++// Todo mirrors the API's todo.
++type Todo struct {
++	ID    int    `json:"id"`
++	Title string `json:"title"`
++	Done  bool   `json:"done"`
++}
++
++// Client calls one todo API server.
++type Client struct {
++	BaseURL string
++	HTTP    *http.Client
++}
++
++// New returns a client for the API at baseURL, e.g. http://localhost:8081.
++func New(baseURL string) *Client {
++	return &Client{
++		BaseURL: strings.TrimRight(baseURL, "/"),
++		HTTP:    &http.Client{Timeout: 10 * time.Second},
++	}
++}
++
++// List returns every todo.
++func (c *Client) List() ([]Todo, error) {
++	var todos []Todo
++	return todos, c.do("GET", "/todos", nil, &todos)
++}
++
++// Add creates a todo and returns it.
++func (c *Client) Add(title string) (Todo, error) {
++	var t Todo
++	return t, c.do("POST", "/todos", map[string]string{"title": title}, &t)
++}
++
++// do sends one request and decodes the JSON response into out. The API's
++// {"error": "..."} body becomes the returned error.
++func (c *Client) do(method, path string, body, out any) error {
++	var payload bytes.Buffer
++	if body != nil {
++		if err := json.NewEncoder(&payload).Encode(body); err != nil {
++			return err
++		}
++	}
++	req, err := http.NewRequest(method, c.BaseURL+path, &payload)
++	if err != nil {
++		return err
++	}
++	req.Header.Set("Content-Type", "application/json")
++
++	resp, err := c.HTTP.Do(req)
++	if err != nil {
++		return err
++	}
++	defer resp.Body.Close()
++
++	if resp.StatusCode >= 400 {
++		var apiErr struct {
++			Error string `json:"error"`
++		}
++		json.NewDecoder(resp.Body).Decode(&apiErr)
++		if apiErr.Error == "" {
++			apiErr.Error = resp.Status
++		}
++		return fmt.Errorf("%s %s: %s", method, path, apiErr.Error)
++	}
++	if out == nil || resp.StatusCode == http.StatusNoContent {
++		return nil
++	}
++	return json.NewDecoder(resp.Body).Decode(out)
++}
+diff --git a/client/client_test.go b/client/client_test.go
+new file mode 100644
+index 0000000..5f02673
+--- /dev/null
++++ b/client/client_test.go
+@@ -0,0 +1,63 @@
++package client
++
++import (
++	"encoding/json"
++	"net/http"
++	"net/http/httptest"
++	"testing"
++)
++
++// fakeAPI serves a tiny in-memory version of the todo API.
++func fakeAPI(t *testing.T) *httptest.Server {
++	t.Helper()
++	todos := []Todo{}
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /todos", func(w http.ResponseWriter, r *http.Request) {
++		json.NewEncoder(w).Encode(todos)
++	})
++	mux.HandleFunc("POST /todos", func(w http.ResponseWriter, r *http.Request) {
++		var req struct {
++			Title string `json:"title"`
++		}
++		json.NewDecoder(r.Body).Decode(&req)
++		if req.Title == "" {
++			w.WriteHeader(http.StatusBadRequest)
++			json.NewEncoder(w).Encode(map[string]string{"error": "title is required"})
++			return
++		}
++		todo := Todo{ID: len(todos) + 1, Title: req.Title}
++		todos = append(todos, todo)
++		w.WriteHeader(http.StatusCreated)
++		json.NewEncoder(w).Encode(todo)
++	})
++	srv := httptest.NewServer(mux)
++	t.Cleanup(srv.Close)
++	return srv
++}
++
++func TestAddThenList(t *testing.T) {
++	c := New(fakeAPI(t).URL)
++
++	added, err := c.Add("buy milk")
++	if err != nil {
++		t.Fatal(err)
++	}
++	if added.ID != 1 || added.Title != "buy milk" {
++		t.Errorf("added %+v", added)
++	}
++
++	todos, err := c.List()
++	if err != nil {
++		t.Fatal(err)
++	}
++	if len(todos) != 1 || todos[0].Title != "buy milk" {
++		t.Errorf("list = %+v", todos)
++	}
++}
++
++func TestAPIErrorIsReturned(t *testing.T) {
++	_, err := New(fakeAPI(t).URL).Add("")
++	if err == nil || err.Error() != "POST /todos: title is required" {
++		t.Errorf("err = %v; want the API's message", err)
++	}
++}
+diff --git a/go.mod b/go.mod
+new file mode 100644
+index 0000000..08204a7
+--- /dev/null
++++ b/go.mod
+@@ -0,0 +1,3 @@
++module example.local/todo-cli
++
++go 1.23
+diff --git a/main.go b/main.go
+new file mode 100644
+index 0000000..67d8a73
+--- /dev/null
++++ b/main.go
+@@ -0,0 +1,66 @@
++// Command todo-cli is a command-line client for the todo API.
++//
++//	todo-cli list
++//	todo-cli add buy milk
++//
++// TODO_URL points it at the API (default http://localhost:8081).
++package main
++
++import (
++	"fmt"
++	"os"
++	"strings"
++
++	"example.local/todo-cli/client"
++)
++
++func main() {
++	if err := run(os.Args[1:]); err != nil {
++		fmt.Fprintln(os.Stderr, "todo-cli:", err)
++		os.Exit(1)
++	}
++}
++
++func run(args []string) error {
++	if len(args) == 0 {
++		return fmt.Errorf("usage: todo-cli list | add TITLE")
++	}
++	c := client.New(env("TODO_URL", "http://localhost:8081"))
++
++	switch args[0] {
++	case "list":
++		todos, err := c.List()
++		if err != nil {
++			return err
++		}
++		for _, t := range todos {
++			fmt.Println(line(t))
++		}
++		return nil
++	case "add":
++		title := strings.Join(args[1:], " ")
++		t, err := c.Add(title)
++		if err != nil {
++			return err
++		}
++		fmt.Println(line(t))
++		return nil
++	}
++	return fmt.Errorf("unknown command %q", args[0])
++}
++
++// line renders a todo as "[x]  3  buy milk".
++func line(t client.Todo) string {
++	box := "[ ]"
++	if t.Done {
++		box = "[x]"
++	}
++	return fmt.Sprintf("%s %3d  %s", box, t.ID, t.Title)
++}
++
++func env(key, fallback string) string {
++	if v := os.Getenv(key); v != "" {
++		return v
++	}
++	return fallback
++}

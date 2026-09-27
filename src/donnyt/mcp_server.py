@@ -215,14 +215,43 @@ def jira_assign(issue_keys: list[str], assignee: str) -> Any:
 
 
 @mcp.tool()
-def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30) -> Any:
+def gitlab_list_mrs(state: str = "opened", author: str = "", limit: int = 30, project: str = "") -> Any:
     """List merge requests on the configured project -- read-only history.
 
     `state` is opened, merged, closed or all. Who did what in a sprint is
     already in its note's "Done by" section (`vault_sync_sprint`); reach for
     this for anything else about past merged work.
     """
-    return _guard(ops.gitlab_list_mrs, state, author, limit)
+    return _guard(ops.gitlab_list_mrs, state, author, limit, project)
+
+
+# --------------------------------------------------------------- estimation
+
+
+@mcp.tool()
+def estimation_context(issue_keys: list[str], similar: int = 5) -> Any:
+    """The evidence to estimate issues on. Call it first when sizing work.
+
+    For each issue: the issue (with description, components, labels); `repos`,
+    the GitLab repos its components/labels map to, and `unmapped: true` when
+    none match -- ask the lead which repos, don't guess; `similar`, up to
+    `similar` finished issues most like it, each with what it actually changed
+    per repo (files, lines added/removed, areas) and its points if estimated;
+    and `layout`, each mapped repo's folder tree. `sizes` is the size scale.
+    An empty `similar` means no comparable history: say the confidence is low.
+    """
+    return _guard(ops.estimation_context, issue_keys, similar)
+
+
+@mcp.tool()
+def jira_set_estimate(key: str, size: str, reasoning: str) -> Any:
+    """Write an agreed estimate to Jira. Team-visible: show the estimates and get approval first.
+
+    `size` is a name from the scale (e.g. M); it is written as its story points
+    through the board, and `reasoning` is added as a comment -- cite the
+    similar issues and the repos. Returns the key, size and points.
+    """
+    return _guard(ops.jira_set_estimate, key, size, reasoning)
 
 
 # -------------------------------------------------------------------- vault

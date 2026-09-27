@@ -81,7 +81,8 @@ off"), ask rather than guess. Holidays and freezes in Notes apply to everyone.
 - In a mix, show both: the points total of the estimated issues, and the
   count of the unestimated ones.
 - **Unestimated issues are normal here.** List them and flag them; never
-  drop an issue for having no points.
+  drop an issue for having no points. When most candidates are unestimated,
+  offer to run `/estimate` on them first — sizing by evidence beats counting.
 
 **Who does it:**
 

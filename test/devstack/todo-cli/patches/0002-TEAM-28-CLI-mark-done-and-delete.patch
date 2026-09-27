@@ -1,0 +1,157 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Lior Ben-David <lior@devstack.local>
+Date: Tue, 22 Sep 2026 11:00:00 +0300
+Subject: [PATCH 2/2] TEAM-28 CLI: mark done and delete
+
+---
+ client/client.go      | 19 +++++++++++++++++++
+ client/client_test.go | 34 ++++++++++++++++++++++++++++++++++
+ main.go               | 38 +++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 90 insertions(+), 1 deletion(-)
+
+diff --git a/client/client.go b/client/client.go
+index 67b8c84..376e1a4 100644
+--- a/client/client.go
++++ b/client/client.go
+@@ -43,6 +43,25 @@ func (c *Client) Add(title string) (Todo, error) {
+ 	return t, c.do("POST", "/todos", map[string]string{"title": title}, &t)
+ }
+ 
++// SetDone marks a todo done or not done. The title is sent too: the API's
++// PATCH replaces it.
++func (c *Client) SetDone(id int, title string, done bool) (Todo, error) {
++	var t Todo
++	body := map[string]any{"title": title, "done": done}
++	return t, c.do("PATCH", fmt.Sprintf("/todos/%d", id), body, &t)
++}
++
++// Get returns one todo.
++func (c *Client) Get(id int) (Todo, error) {
++	var t Todo
++	return t, c.do("GET", fmt.Sprintf("/todos/%d", id), nil, &t)
++}
++
++// Delete removes a todo.
++func (c *Client) Delete(id int) error {
++	return c.do("DELETE", fmt.Sprintf("/todos/%d", id), nil, nil)
++}
++
+ // do sends one request and decodes the JSON response into out. The API's
+ // {"error": "..."} body becomes the returned error.
+ func (c *Client) do(method, path string, body, out any) error {
+diff --git a/client/client_test.go b/client/client_test.go
+index 5f02673..f2acade 100644
+--- a/client/client_test.go
++++ b/client/client_test.go
+@@ -61,3 +61,37 @@ func TestAPIErrorIsReturned(t *testing.T) {
+ 		t.Errorf("err = %v; want the API's message", err)
+ 	}
+ }
++
++func TestSetDoneAndDelete(t *testing.T) {
++	todos := map[string]Todo{"1": {ID: 1, Title: "buy milk"}}
++	mux := http.NewServeMux()
++	mux.HandleFunc("GET /todos/{id}", func(w http.ResponseWriter, r *http.Request) {
++		json.NewEncoder(w).Encode(todos[r.PathValue("id")])
++	})
++	mux.HandleFunc("PATCH /todos/{id}", func(w http.ResponseWriter, r *http.Request) {
++		var req Todo
++		json.NewDecoder(r.Body).Decode(&req)
++		t := todos[r.PathValue("id")]
++		t.Title, t.Done = req.Title, req.Done
++		todos[r.PathValue("id")] = t
++		json.NewEncoder(w).Encode(t)
++	})
++	mux.HandleFunc("DELETE /todos/{id}", func(w http.ResponseWriter, r *http.Request) {
++		delete(todos, r.PathValue("id"))
++		w.WriteHeader(http.StatusNoContent)
++	})
++	srv := httptest.NewServer(mux)
++	defer srv.Close()
++	c := New(srv.URL)
++
++	got, err := c.SetDone(1, "buy milk", true)
++	if err != nil || !got.Done || got.Title != "buy milk" {
++		t.Fatalf("SetDone = %+v, %v", got, err)
++	}
++	if err := c.Delete(1); err != nil {
++		t.Fatal(err)
++	}
++	if len(todos) != 0 {
++		t.Errorf("todo still there after Delete: %+v", todos)
++	}
++}
+diff --git a/main.go b/main.go
+index 67d8a73..85223f7 100644
+--- a/main.go
++++ b/main.go
+@@ -2,6 +2,8 @@
+ //
+ //	todo-cli list
+ //	todo-cli add buy milk
++//	todo-cli done 3
++//	todo-cli rm 3
+ //
+ // TODO_URL points it at the API (default http://localhost:8081).
+ package main
+@@ -9,6 +11,7 @@ package main
+ import (
+ 	"fmt"
+ 	"os"
++	"strconv"
+ 	"strings"
+ 
+ 	"example.local/todo-cli/client"
+@@ -23,7 +26,7 @@ func main() {
+ 
+ func run(args []string) error {
+ 	if len(args) == 0 {
+-		return fmt.Errorf("usage: todo-cli list | add TITLE")
++		return fmt.Errorf("usage: todo-cli list | add TITLE | done ID | undone ID | rm ID")
+ 	}
+ 	c := client.New(env("TODO_URL", "http://localhost:8081"))
+ 
+@@ -45,10 +48,43 @@ func run(args []string) error {
+ 		}
+ 		fmt.Println(line(t))
+ 		return nil
++	case "done", "undone":
++		id, err := idArg(args)
++		if err != nil {
++			return err
++		}
++		current, err := c.Get(id)
++		if err != nil {
++			return err
++		}
++		t, err := c.SetDone(id, current.Title, args[0] == "done")
++		if err != nil {
++			return err
++		}
++		fmt.Println(line(t))
++		return nil
++	case "rm":
++		id, err := idArg(args)
++		if err != nil {
++			return err
++		}
++		return c.Delete(id)
+ 	}
+ 	return fmt.Errorf("unknown command %q", args[0])
+ }
+ 
++// idArg reads the todo id after a command: todo-cli done 3.
++func idArg(args []string) (int, error) {
++	if len(args) != 2 {
++		return 0, fmt.Errorf("usage: todo-cli %s ID", args[0])
++	}
++	id, err := strconv.Atoi(args[1])
++	if err != nil || id < 1 {
++		return 0, fmt.Errorf("%q is not a todo id", args[1])
++	}
++	return id, nil
++}
++
+ // line renders a todo as "[x]  3  buy milk".
+ func line(t client.Todo) string {
+ 	box := "[ ]"

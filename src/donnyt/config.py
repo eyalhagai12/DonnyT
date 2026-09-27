@@ -103,6 +103,18 @@ class TeamMember:
 
 
 @dataclass
+class Repo:
+    """A GitLab project the team works in, and the Jira components or labels
+    whose tickets touch it. No ``jira`` entries means every ticket may."""
+
+    project: str
+    jira: list[str] = field(default_factory=list)
+
+
+DEFAULT_SIZES = {"XS": 1.0, "S": 2.0, "M": 3.0, "L": 5.0, "XL": 8.0}
+
+
+@dataclass
 class Config:
     raw: dict[str, Any]
     root: Path
@@ -276,7 +288,43 @@ class Config:
 
     @property
     def gitlab_default_project(self) -> str:
-        return str(self._get("gitlab.default_project", default="") or "")
+        """``gitlab.default_project``, or else the first of ``[[gitlab.repos]]``."""
+        project = str(self._get("gitlab.default_project", default="") or "")
+        return project or next((r.project for r in self.repos), "")
+
+    @property
+    def repos(self) -> list[Repo]:
+        """Every repo DonnyT reads. A config with only ``gitlab.default_project``
+        (from before multi-repo) is one repo that every ticket maps to."""
+        entries = self._get("gitlab.repos", default=[]) or []
+        repos = [
+            Repo(project=str(e["project"]), jira=[str(j) for j in e.get("jira", []) or []])
+            for e in entries if isinstance(e, dict) and e.get("project")
+        ]
+        if not repos:
+            single = str(self._get("gitlab.default_project", default="") or "")
+            repos = [Repo(project=single)] if single else []
+        return repos
+
+    def repos_for(self, components: list[str], labels: list[str]) -> list[Repo]:
+        """The repos a ticket touches, by its Jira components and labels
+        (case-insensitive). Empty when nothing maps: ask, don't guess."""
+        tags = {t.lower() for t in [*components, *labels]}
+        return [r for r in self.repos if not r.jira or tags & {j.lower() for j in r.jira}]
+
+    # -- estimation --------------------------------------------------------
+    @property
+    def estimation_sizes(self) -> dict[str, float]:
+        """Size name -> story points, smallest first."""
+        raw = self._get("estimation.sizes", default=None) or DEFAULT_SIZES
+        try:
+            sizes = {str(k).upper(): float(v) for k, v in dict(raw).items()}
+        except (TypeError, ValueError):
+            raise ConfigError(
+                "estimation.sizes in config.toml must map size names to numbers, e.g. "
+                '{ XS = 1, S = 2, M = 3, L = 5, XL = 8 } (INSTALL.md step 5).'
+            ) from None
+        return dict(sorted(sizes.items(), key=lambda kv: kv[1]))
 
     # -- vault -------------------------------------------------------------
     @property

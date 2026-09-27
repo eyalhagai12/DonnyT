@@ -85,9 +85,29 @@ done_statuses = ["Done", "Closed", "Resolved"]
 # Your GitLab instance. Self-hosted example: "https://gitlab.internal.corp"
 url = "https://gitlab.com"
 
-# The project whose merged work is credited to the team, as
-# "group/subgroup/repo" or its numeric id. DonnyT only reads it.
+# The team's repos. DonnyT only reads them: merged work is credited in each
+# sprint's "Done by", and /estimate reads what similar work changed.
+#
+# One repo? default_project is enough, as "group/subgroup/repo" or its id.
 default_project = ""
+
+# Several repos? List each one instead, with the Jira components or labels
+# whose tickets touch it -- that is how a ticket finds its repos. A repo with
+# no `jira` list takes every ticket. `donnyt doctor` names any Jira component
+# no repo claims.
+#
+# [[gitlab.repos]]
+# project = "platform/backend/api"
+# jira = ["api", "backend"]
+#
+# [[gitlab.repos]]
+# project = "platform/web"
+# jira = ["web"]
+
+
+[estimation]
+# Optional. The size scale /estimate uses: size name -> story points.
+# sizes = { XS = 1, S = 2, M = 3, L = 5, XL = 8 }
 
 
 [vault]

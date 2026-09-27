@@ -272,15 +272,39 @@ def _probe_gitlab(config: Any) -> dict[str, Any]:
         me = client.http.get("/user")
         detail = f"authenticated as @{me.get('username', '?')} on {config.gitlab_url}"
 
-        if not config.gitlab_default_project:
+        repos = config.repos
+        if not repos:
             return _check(
                 "gitlab",
                 OK,
-                f"{detail}; no default project set",
-                "Set gitlab.default_project in config.toml to skip passing it every time.",
+                f"{detail}; no repos configured",
+                "Add [[gitlab.repos]] to config.toml (INSTALL.md step 5): who-did-what and "
+                "estimation read merged work from them.",
             )
-        project = client.get_project()
-        return _check("gitlab", OK, f"{detail}; project {project['path']}")
+        for repo in repos:
+            try:
+                client.get_project(repo.project)
+            except Exception as exc:
+                return _check(
+                    "gitlab",
+                    FAIL,
+                    f"{detail}; repo {repo.project!r}: {exc}",
+                    "Check the `project` of that [[gitlab.repos]] entry in config.toml -- the exact "
+                    "group/subgroup/repo path -- and that GITLAB_TOKEN can read it (read_api).",
+                )
+        listing = ", ".join(
+            f"{r.project} ({', '.join(r.jira) or 'every ticket'})" for r in repos
+        )
+        unmapped = _unmapped_components(config)
+        if unmapped:
+            return _check(
+                "gitlab",
+                OK,
+                f"{detail}; repos {listing}",
+                f"Jira components that map to no repo: {', '.join(unmapped)}. Estimation will ask "
+                "about their tickets; add them to a repo's `jira` list in [[gitlab.repos]].",
+            )
+        return _check("gitlab", OK, f"{detail}; repos {listing}")
     except ConfigError as exc:
         return _check("gitlab", FAIL, str(exc))
     except Exception as exc:
@@ -288,9 +312,24 @@ def _probe_gitlab(config: Any) -> dict[str, Any]:
             "gitlab",
             FAIL,
             str(exc),
-            "Check gitlab.url and gitlab.default_project in config.toml, and that GITLAB_TOKEN "
-            "has the 'api' scope.",
+            "Check gitlab.url and [[gitlab.repos]] in config.toml, and that GITLAB_TOKEN "
+            "has the read_api scope.",
         )
+
+
+def _unmapped_components(config: Any) -> list[str]:
+    """Jira components in the project that no repo claims. Best effort: [] on any error."""
+    if any(not r.jira for r in config.repos):
+        return []  # a catch-all repo claims every ticket
+    try:
+        from .jira import JiraClient
+
+        jira = JiraClient(config)
+        found = jira.http.get(f"{jira.api}/project/{config.jira_project_key}/components") or []
+        claimed = {j.lower() for r in config.repos for j in r.jira}
+        return sorted(c["name"] for c in found if c.get("name", "").lower() not in claimed)
+    except Exception:
+        return []
 
 
 def _probe_vault(config: Any) -> dict[str, Any]:

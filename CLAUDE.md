@@ -32,6 +32,7 @@ aspirational — it is the deployment target.
 | `vault.py` | Obsidian notes: frontmatter, links, managed blocks. |
 | `ui.py` | Mockups: screenshots of the running app and HTML → PNG, via the installed Edge/Chrome run headless. |
 | `graph.py` | Domain layer — turns API facts into linked notes, including each sprint's "Done by". |
+| `estimate.py` | Evidence for estimates: similar finished issues (word overlap) and what each changed, per repo. Judgement stays with the model and the lead. |
 | `ops.py` | Every operation, once. Both front ends call it; expected failures raise `OpError(code, msg)`. |
 | `mcp_server.py` | Tool definitions over `ops`. One-line bodies; logic belongs in `ops` or below. |
 | `cli.py` | The same operations from a terminal. `TOOLS` maps each MCP tool to its command. |
@@ -108,6 +109,14 @@ python -m donnyt.cli doctor
 - GitLab reports people by **username**, Jira by **display name**. Anything
   written to the vault goes through `config.member_by` to the roster name
   (`GraphBuilder._person`), or one person becomes two notes.
+- Repos come from `[[gitlab.repos]]`, each with the Jira components/labels
+  that map to it; `config.repos` falls back to `gitlab.default_project` alone.
+  `repos_for` returning `[]` means "nothing maps" -- ask, never guess.
+- MR numbers repeat across repos. Anything that names an MR outside GitLab
+  says `project!iid` (`graph._mr_ref`), and every GitLab call takes `project`.
+- Estimates are written through the agile API (`/rest/agile/1.0/issue/{key}/estimation?boardId=`),
+  which fills the board's estimation field even when it is not on the issue's
+  screen -- Bugs and Tasks usually lack Story Points there.
 - `GitLabClient.merged_between` filters on `merged_at` itself: the API can only
   filter merged MRs by last update, which is at or after the merge.
 - Note frontmatter is a small YAML subset: no inline `# comments` (they become

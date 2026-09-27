@@ -40,7 +40,12 @@ Their Focus lives in `donnyt/vault/People/`. Edit it like the real thing.
 ## 2. Run it — Claude as the team
 
 Reset the working copy first: `python test/devstack/team.py clone`
-(`donnyt/work/todo`, git-ignored).
+(`donnyt/work/todo`, git-ignored). Tickets with the `cli` component live in
+the second repo: put `--repo team/todo-cli` before any command
+(`team.py --repo team/todo-cli clone`, `... commit`, `... mr`) and it works in
+`donnyt/work/todo-cli` instead.
+
+Unestimated backlog? `/estimate` sizes it from both repos' history first.
 
 For each ticket, as its assignee:
 

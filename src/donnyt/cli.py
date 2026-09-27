@@ -43,7 +43,9 @@ TOOLS: dict[str, str] = {
     "jira_add_to_sprint": "add-to-sprint SPRINT_ID KEY [KEY ...]",
     "jira_update_sprint": "update-sprint SPRINT_ID [--name N] [--goal TEXT] [--start D] [--end D]",
     "jira_assign": "assign ASSIGNEE KEY [KEY ...]",
-    "gitlab_list_mrs": "mrs [--state S] [--author USER] [--limit N]",
+    "gitlab_list_mrs": "mrs [--state S] [--author USER] [--limit N] [--project P]",
+    "estimation_context": "estimate-context KEY [KEY ...] [--similar N]",
+    "jira_set_estimate": "set-estimate KEY SIZE --reasoning TEXT",
     "vault_search": "vault-search QUERY [--limit N]",
     "vault_read": "vault-read TITLE",
     "vault_links": "vault-links TITLE",
@@ -163,6 +165,17 @@ def build_parser() -> argparse.ArgumentParser:
     mrs.add_argument("--state", default="opened")
     mrs.add_argument("--author", default="")
     mrs.add_argument("--limit", type=int, default=30)
+    mrs.add_argument("--project", default="", help="group/repo; default: the first configured repo.")
+
+    # -- estimation --------------------------------------------------------
+    est = sub.add_parser("estimate-context", help="Evidence for estimating issues: similar past work, per repo.")
+    est.add_argument("keys", nargs="+")
+    est.add_argument("--similar", type=int, default=5)
+
+    set_est = sub.add_parser("set-estimate", help="Write an agreed estimate to Jira. Team-visible.")
+    set_est.add_argument("key")
+    set_est.add_argument("size", help="A size from estimation.sizes, e.g. M.")
+    set_est.add_argument("--reasoning", required=True)
 
     # -- ui mockups --------------------------------------------------------
     sub.add_parser("ui-style", help="Show the style folder: notes, reference screenshots, browser.")
@@ -302,7 +315,10 @@ _HANDLERS: dict[str, Any] = {
     "update-sprint": lambda a: ops.jira_update_sprint(a.sprint_id, a.name, a.goal, a.start, a.end),
     "assign": lambda a: ops.jira_assign(a.keys, a.assignee),
     # gitlab
-    "mrs": lambda a: ops.gitlab_list_mrs(a.state, a.author, a.limit),
+    "mrs": lambda a: ops.gitlab_list_mrs(a.state, a.author, a.limit, a.project),
+    # estimation
+    "estimate-context": lambda a: ops.estimation_context(a.keys, a.similar),
+    "set-estimate": lambda a: ops.jira_set_estimate(a.key, a.size, a.reasoning),
     # vault
     "sync": lambda a: ops.vault_sync(a.sprints_back),
     "sync-sprint": lambda a: ops.vault_sync_sprint(a.sprint_id, _read_text(a.plan_file) if a.plan_file else ""),
